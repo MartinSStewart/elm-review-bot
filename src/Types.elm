@@ -4,6 +4,7 @@ import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
 import Http
+import Review.Rule
 import Url exposing (Url)
 import Version exposing (MajorVersion, Version)
 import Zip exposing (Zip)
@@ -16,30 +17,38 @@ type alias FrontendModel =
 
 
 type PackageStatus
-    = FetchingZip Version
-    | FetchedZip Version Zip
-    | IsChecked Version Zip
-    | Failed Version Http.Error
+    = FetchedAndChecked Version Zip (Result CheckError (List Review.Rule.ReviewError))
+    | FetchingZipFailed Version Http.Error
+
+
+type CheckError
+    = ElmJsonMissing
+    | ElmJsonIsForApplication
 
 
 packageVersion : PackageStatus -> Version
 packageVersion packageStatus =
     case packageStatus of
-        FetchingZip version ->
+        FetchedAndChecked version _ _ ->
             version
 
-        FetchedZip version _ ->
+        FetchingZipFailed version _ ->
             version
 
-        IsChecked version _ ->
-            version
 
-        Failed version _ ->
-            version
+packageZip : PackageStatus -> Maybe Zip
+packageZip packageStatus =
+    case packageStatus of
+        FetchedAndChecked _ zip _ ->
+            Just zip
+
+        FetchingZipFailed _ _ ->
+            Nothing
 
 
 type alias BackendModel =
     { cachedPackages : Dict ( String, MajorVersion ) PackageStatus
+    , todos : List ( String, Version )
     }
 
 
@@ -54,8 +63,7 @@ type ToBackend
 
 
 type BackendMsg
-    = NoOpBackendMsg
-    | GotNewPackagePreviews (Result Http.Error (Dict String (List Version)))
+    = GotNewPackagePreviews (Result Http.Error (List ( String, Version )))
     | FetchedZipResult String Version (Result Http.Error Zip)
 
 
