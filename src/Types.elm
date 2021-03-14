@@ -5,6 +5,8 @@ import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
 import Http
 import Url exposing (Url)
+import Version exposing (MajorVersion, Version)
+import Zip exposing (Zip)
 
 
 type alias FrontendModel =
@@ -13,9 +15,31 @@ type alias FrontendModel =
     }
 
 
+type PackageStatus
+    = FetchingZip Version
+    | FetchedZip Version Zip
+    | IsChecked Version Zip
+    | Failed Version Http.Error
+
+
+packageVersion : PackageStatus -> Version
+packageVersion packageStatus =
+    case packageStatus of
+        FetchingZip version ->
+            version
+
+        FetchedZip version _ ->
+            version
+
+        IsChecked version _ ->
+            version
+
+        Failed version _ ->
+            version
+
+
 type alias BackendModel =
-    { cachedPackages : Dict String { version : String }
-    , cachedCount : Int
+    { cachedPackages : Dict ( String, MajorVersion ) PackageStatus
     }
 
 
@@ -29,25 +53,10 @@ type ToBackend
     = NoOpToBackend
 
 
-type alias PackagePreview =
-    { version : Version }
-
-
 type BackendMsg
     = NoOpBackendMsg
     | GotNewPackagePreviews (Result Http.Error (Dict String (List Version)))
-
-
-type alias Version =
-    { major : Int
-    , minor : Int
-    , patch : Int
-    }
-
-
-versionToString : Version -> String
-versionToString { major, minor, patch } =
-    String.fromInt major ++ "." ++ String.fromInt minor ++ "." ++ String.fromInt patch
+    | FetchedZipResult String Version (Result Http.Error Zip)
 
 
 type ToFrontend

@@ -5,9 +5,12 @@ import Html
 import Http
 import Json.Decode exposing (Decoder)
 import Lamdera exposing (ClientId, SessionId)
+import List.Extra as List
+import Process
 import Set exposing (Set)
 import Task exposing (Task)
 import Types exposing (..)
+import Version exposing (MajorVersion, Version)
 import Zip exposing (Zip)
 
 
@@ -77,7 +80,7 @@ getPackageEndpoint packageName version =
             "https://package.elm-lang.org/packages/"
                 ++ packageName
                 ++ "/"
-                ++ Types.versionToString version
+                ++ Version.toString version
                 ++ "/endpoint.json"
         , body = Http.emptyBody
         , resolver =
@@ -149,8 +152,8 @@ app =
 
 init : ( Model, Cmd BackendMsg )
 init =
-    ( { cachedPackages = Dict.empty, cachedCount = 0 }
-    , Cmd.none
+    ( { cachedPackages = Dict.empty }
+    , getAllPackages Nothing
     )
 
 
@@ -161,20 +164,72 @@ update msg model =
             ( model, Cmd.none )
 
         GotNewPackagePreviews result ->
-            case result of
+            case Debug.log "result" result of
                 Ok newPackages ->
-                    ( { cachedPackages = model.cachedPackages
-                      , cachedCount =
-                            Dict.foldl
-                                (\_ value counter -> List.length value + counter)
-                                0
-                                newPackages
+                    let
+                        majorOnly : Dict ( String, MajorVersion ) Version
+                        majorOnly =
+                            Dict.toList newPackages
+                                |> List.concatMap
+                                    (\( packageName, versions ) ->
+                                        List.reverse versions
+                                            |> List.uniqueBy .major
+                                            |> List.map (\version -> ( ( packageName, version.major ), version ))
+                                    )
+                                |> Dict.fromList
+                    in
+                    ( { cachedPackages =
+                            Dict.union
+                                (Dict.map (\_ version -> FetchingZip version) majorOnly)
+                                model.cachedPackages
                       }
-                    , Cmd.none
+                    , Dict.toList majorOnly
+                        |> List.indexedMap
+                            (\index ( ( packageName, _ ), version ) ->
+                                Process.sleep (toFloat (index * 2000))
+                                    |> Task.andThen (\() -> getPackageEndpoint packageName version)
+                                    |> Task.andThen getPackageZip
+                                    |> Task.attempt (FetchedZipResult packageName version)
+                            )
+                        |> Cmd.batch
                     )
 
                 Err error ->
                     Debug.todo ""
+
+        FetchedZipResult packageName version result ->
+            ( { cachedPackages =
+                    Dict.update
+                        ( packageName, version.major )
+                        (Maybe.map
+                            (\value ->
+                                case value of
+                                    FetchedZip _ _ ->
+                                        value
+
+                                    FetchingZip version_ ->
+                                        if version_ == version then
+                                            case result of
+                                                Ok zip ->
+                                                    FetchedZip version zip
+
+                                                Err error ->
+                                                    Failed version error
+
+                                        else
+                                            FetchingZip version_
+
+                                    IsChecked version_ zip ->
+                                        IsChecked version_ zip
+
+                                    Failed version_ error ->
+                                        Failed version_ error
+                            )
+                        )
+                        model.cachedPackages
+              }
+            , Cmd.none
+            )
 
 
 updateFromFrontend : SessionId -> ClientId -> ToBackend -> Model -> ( Model, Cmd BackendMsg )
