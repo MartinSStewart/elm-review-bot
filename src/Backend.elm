@@ -5,18 +5,17 @@ import Elm.Constraint exposing (Constraint)
 import Elm.Docs
 import Elm.Package
 import Elm.Project
+import Elm.Version as Version exposing (Version)
 import Http
 import Json.Decode exposing (Decoder)
 import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
 import NoUnused.Dependencies
-import Process
 import Review.Project
 import Review.Project.Dependency
 import Review.Rule
 import Task exposing (Task)
 import Types exposing (..)
-import Version exposing (MajorVersion, Version)
 import Zip exposing (Zip)
 import Zip.Entry
 
@@ -33,16 +32,11 @@ decodeAllPackages =
                 (\text ->
                     case String.split "@" text of
                         name :: versionText :: [] ->
-                            case String.split "." versionText of
-                                major :: minor :: patch :: [] ->
-                                    Maybe.map3 Version
-                                        (String.toInt major)
-                                        (String.toInt minor)
-                                        (String.toInt patch)
-                                        |> Maybe.map (Tuple.pair name >> Json.Decode.succeed)
-                                        |> Maybe.withDefault (Json.Decode.fail "Invalid version number")
+                            case Version.fromString versionText of
+                                Just version ->
+                                    Json.Decode.succeed ( name, version )
 
-                                _ ->
+                                Nothing ->
                                     Json.Decode.fail "Invalid version number"
 
                         _ ->
@@ -148,7 +142,7 @@ app =
 
 init : ( Model, Cmd BackendMsg )
 init =
-    ( { cachedPackages = Dict.empty }
+    ( { cachedPackages = Dict.empty, todos = [] }
     , getAllPackages packageCountOffset
     )
 
@@ -161,28 +155,32 @@ update : BackendMsg -> Model -> ( Model, Cmd BackendMsg )
 update msg model =
     case msg of
         GotNewPackagePreviews result ->
-            case Debug.log "result" result of
+            case result of
                 Ok newPackages ->
                     let
-                        majorOnly : Dict ( String, MajorVersion ) Version
-                        majorOnly =
-                            List.gatherEqualsBy Tuple.first newPackages
-                                |> List.map (\( ( name, version ), rest ) -> ( name, version :: List.map Tuple.second rest ))
-                                |> List.concatMap
-                                    (\( packageName, versions ) ->
-                                        List.reverse versions
-                                            |> List.uniqueBy .major
-                                            |> List.map (\version -> ( ( packageName, version.major ), version ))
-                                    )
+                        ( todosLeft, cmd ) =
+                            nextTodo (model.todos ++ newPackages)
                     in
+                    --let
+                    --    majorOnly : Dict ( String, MajorVersion ) Version
+                    --    majorOnly =
+                    --        List.gatherEqualsBy Tuple.first newPackages
+                    --            |> List.map (\( ( name, version ), rest ) -> ( name, version :: List.map Tuple.second rest ))
+                    --            |> List.concatMap
+                    --                (\( packageName, versions ) ->
+                    --                    List.reverse versions
+                    --                        |> List.uniqueBy .major
+                    --                        |> List.map (\version -> ( ( packageName, version.major ), version ))
+                    --                )
+                    --in
                     ( { model
                         | --{ cachedPackages =
                           --       Dict.union
                           --           (Dict.map (\_ version -> FetchingZip version) majorOnly)
                           --           model.cachedPackages
-                          todos = newPackages
+                          todos = todosLeft
                       }
-                    , Cmd.none
+                    , cmd
                       --, Dict.toList majorOnly
                       --    |> List.indexedMap
                       --        (\index ( ( packageName, _ ), version ) ->
@@ -198,39 +196,49 @@ update msg model =
                     ( model, Cmd.none )
 
         FetchedZipResult packageName version result ->
-            --let
-            --    _ =
-            --        Debug.log "model " model.cachedPackages
-            --in
+            let
+                ( todosLeft, cmd ) =
+                    nextTodo model.todos
+            in
             ( { cachedPackages =
                     Dict.update
-                        ( packageName, version.major )
-                        (Maybe.map
-                            (\value ->
-                                case value of
-                                    FetchingZip version_ ->
-                                        if version_ == version then
-                                            case result of
-                                                Ok zip ->
-                                                    FetchedAndChecked version zip (checkPackage model.cachedPackages zip)
+                        packageName
+                        (\maybeValue ->
+                            let
+                                value =
+                                    Maybe.withDefault [] maybeValue
+                            in
+                            (case result of
+                                Ok zip ->
+                                    FetchedAndChecked version zip (checkPackage model.cachedPackages zip) :: value
 
-                                                Err error ->
-                                                    FetchingZipFailed version error
-
-                                        else
-                                            FetchingZip version_
-
-                                    _ ->
-                                        value
+                                Err error ->
+                                    FetchingZipFailed version error :: value
                             )
+                                |> Just
                         )
                         model.cachedPackages
+              , todos = todosLeft
               }
-            , Cmd.none
+            , cmd
             )
 
 
-checkPackage : Dict ( String, Int ) PackageStatus -> Zip -> Result CheckError (List Review.Rule.ReviewError)
+nextTodo : List ( String, Version ) -> ( List ( String, Version ), Cmd BackendMsg )
+nextTodo todos =
+    case todos of
+        ( packageName, version ) :: rest ->
+            ( rest
+            , getPackageEndpoint packageName version
+                |> Task.andThen getPackageZip
+                |> Task.attempt (FetchedZipResult packageName version)
+            )
+
+        [] ->
+            ( todos, Cmd.none )
+
+
+checkPackage : Dict String (List PackageStatus) -> Zip -> Result CheckError (List Review.Rule.ReviewError)
 checkPackage cached zip =
     let
         project : Review.Project.Project
@@ -261,7 +269,7 @@ checkPackage cached zip =
                                     case Json.Decode.decodeString Elm.Project.decoder source of
                                         Ok elmJsonProject ->
                                             Review.Project.addElmJson
-                                                { path = Zip.Entry.path zipEntry, raw = source, project = elmJsonProject }
+                                                { path = Zip.Entry.path zipEntry |> Debug.log "path ", raw = source, project = elmJsonProject }
                                                 project_
 
                                         Err _ ->
@@ -285,16 +293,27 @@ checkPackage cached zip =
                         projectWithDependencies =
                             List.foldl
                                 (\( packageName, constraint ) state ->
-                                    case
-                                        Dict.get
-                                            ( Debug.log "packagename" (Elm.Package.toString packageName)
-                                            , majorVersion constraint
-                                            )
-                                            cached
-                                    of
-                                        Just package ->
-                                            case Types.packageZip package of
-                                                Just zip_ ->
+                                    case Dict.get (Elm.Package.toString packageName) cached of
+                                        Just packages ->
+                                            case
+                                                List.filterMap
+                                                    (\package ->
+                                                        if
+                                                            Elm.Constraint.check
+                                                                (Types.packageVersion package)
+                                                                constraint
+                                                        then
+                                                            Maybe.map
+                                                                (Tuple.pair (Types.packageVersion package))
+                                                                (Types.packageZip package)
+
+                                                        else
+                                                            Nothing
+                                                    )
+                                                    packages
+                                                    |> List.maximumWith (\( a, _ ) ( b, _ ) -> Version.compare a b)
+                                            of
+                                                Just ( _, zip_ ) ->
                                                     addDependency zip_ state
 
                                                 Nothing ->
@@ -306,9 +325,9 @@ checkPackage cached zip =
                                 project
                                 packageInfo.deps
                     in
-                    Review.Rule.reviewV2 [ NoUnused.Dependencies.rule ] Nothing projectWithDependencies
+                    Review.Rule.reviewV2 [ NoUnused.Dependencies.rule ] Nothing (Debug.log "project" projectWithDependencies)
                         |> .errors
-                        |> Debug.log ("errors " ++ elmJson.path)
+                        |> Debug.log ("errors " ++ elmJson.path ++ "   ")
                         |> Ok
 
                 Elm.Project.Application _ ->
@@ -332,16 +351,19 @@ addDependency zip project =
                             ( path, Ok source ) ->
                                 if List.last path |> (==) (Just "elm.json") then
                                     case Json.Decode.decodeString Elm.Project.decoder source of
-                                        Ok elmJsonProject ->
-                                            { data_ | elmJson = Just elmJsonProject }
+                                        Ok (Elm.Project.Package elmJsonProject) ->
+                                            { data_
+                                                | elmJson = Just (Elm.Project.Package elmJsonProject)
+                                                , name = Elm.Package.toString elmJsonProject.name |> Just
+                                            }
 
-                                        Err _ ->
+                                        _ ->
                                             data_
 
                                 else if List.last path |> (==) (Just "docs.json") then
-                                    case Json.Decode.decodeString Elm.Docs.decoder source of
-                                        Ok elmJsonProject ->
-                                            { data_ | modules = elmJsonProject :: data_.modules }
+                                    case Json.Decode.decodeString (Json.Decode.list Elm.Docs.decoder) source of
+                                        Ok elmJsonProjects ->
+                                            { data_ | modules = elmJsonProjects ++ data_.modules }
 
                                         Err _ ->
                                             data_
@@ -354,6 +376,7 @@ addDependency zip project =
                 )
                 { name = Nothing, elmJson = Nothing, modules = [] }
                 (Zip.ls zip)
+                |> Debug.log "dependencyData"
     in
     case
         Maybe.map2

@@ -3,10 +3,10 @@ module Types exposing (..)
 import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
+import Elm.Version exposing (Version)
 import Http
 import Review.Rule
 import Url exposing (Url)
-import Version exposing (MajorVersion, Version)
 import Zip exposing (Zip)
 
 
@@ -47,7 +47,7 @@ packageZip packageStatus =
 
 
 type alias BackendModel =
-    { cachedPackages : Dict ( String, MajorVersion ) PackageStatus
+    { cachedPackages : Dict String (List PackageStatus)
     , todos : List ( String, Version )
     }
 
