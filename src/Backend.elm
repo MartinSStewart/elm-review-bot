@@ -10,6 +10,7 @@ import Http
 import Json.Decode exposing (Decoder)
 import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
+import List.Nonempty
 import NoUnused.Dependencies
 import Review.Project
 import Review.Project.Dependency
@@ -86,11 +87,91 @@ getPackageEndpoint packageName version =
                         Http.NetworkError_ ->
                             Err Http.NetworkError
 
-                        Http.BadStatus_ metadata body ->
+                        Http.BadStatus_ metadata _ ->
                             Http.BadStatus metadata.statusCode |> Err
 
-                        Http.GoodStatus_ metadata body ->
+                        Http.GoodStatus_ _ body ->
                             case Json.Decode.decodeString decodePackageEndpoint body of
+                                Ok ok ->
+                                    Ok ok
+
+                                Err error ->
+                                    Http.BadBody (Json.Decode.errorToString error) |> Err
+                )
+        , timeout = Nothing
+        }
+
+
+getPackageDocs : String -> Version -> Task Http.Error (List Elm.Docs.Module)
+getPackageDocs packageName version =
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url =
+            "https://package.elm-lang.org/packages/"
+                ++ packageName
+                ++ "/"
+                ++ Version.toString version
+                ++ "/docs.json"
+        , body = Http.emptyBody
+        , resolver =
+            Http.stringResolver
+                (\response ->
+                    case response of
+                        Http.BadUrl_ url ->
+                            Http.BadUrl url |> Err
+
+                        Http.Timeout_ ->
+                            Err Http.Timeout
+
+                        Http.NetworkError_ ->
+                            Err Http.NetworkError
+
+                        Http.BadStatus_ metadata _ ->
+                            Http.BadStatus metadata.statusCode |> Err
+
+                        Http.GoodStatus_ _ body ->
+                            case Json.Decode.decodeString (Json.Decode.list Elm.Docs.decoder) body of
+                                Ok ok ->
+                                    Ok ok
+
+                                Err error ->
+                                    Http.BadBody (Json.Decode.errorToString error) |> Err
+                )
+        , timeout = Nothing
+        }
+
+
+getPackageElmJson : String -> Version -> Task Http.Error Elm.Project.Project
+getPackageElmJson packageName version =
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url =
+            "https://package.elm-lang.org/packages/"
+                ++ packageName
+                ++ "/"
+                ++ Version.toString version
+                ++ "/elm.json"
+        , body = Http.emptyBody
+        , resolver =
+            Http.stringResolver
+                (\response ->
+                    case response of
+                        Http.BadUrl_ url ->
+                            Http.BadUrl url |> Err
+
+                        Http.Timeout_ ->
+                            Err Http.Timeout
+
+                        Http.NetworkError_ ->
+                            Err Http.NetworkError
+
+                        Http.BadStatus_ metadata _ ->
+                            Http.BadStatus metadata.statusCode |> Err
+
+                        Http.GoodStatus_ _ body ->
+                            case Json.Decode.decodeString Elm.Project.decoder body of
                                 Ok ok ->
                                     Ok ok
 
@@ -121,10 +202,10 @@ getPackageZip packageEndpoint =
                         Http.NetworkError_ ->
                             Err Http.NetworkError
 
-                        Http.BadStatus_ metadata body ->
+                        Http.BadStatus_ metadata _ ->
                             Http.BadStatus metadata.statusCode |> Err
 
-                        Http.GoodStatus_ metadata body ->
+                        Http.GoodStatus_ _ body ->
                             Zip.fromBytes body |> Result.fromMaybe (Http.BadBody "Failed to open zip file.")
                 )
         , timeout = Nothing
@@ -136,7 +217,7 @@ app =
         { init = init
         , update = update
         , updateFromFrontend = updateFromFrontend
-        , subscriptions = \m -> Sub.none
+        , subscriptions = \_ -> Sub.none
         }
 
 
@@ -161,36 +242,7 @@ update msg model =
                         ( todosLeft, cmd ) =
                             nextTodo (model.todos ++ newPackages)
                     in
-                    --let
-                    --    majorOnly : Dict ( String, MajorVersion ) Version
-                    --    majorOnly =
-                    --        List.gatherEqualsBy Tuple.first newPackages
-                    --            |> List.map (\( ( name, version ), rest ) -> ( name, version :: List.map Tuple.second rest ))
-                    --            |> List.concatMap
-                    --                (\( packageName, versions ) ->
-                    --                    List.reverse versions
-                    --                        |> List.uniqueBy .major
-                    --                        |> List.map (\version -> ( ( packageName, version.major ), version ))
-                    --                )
-                    --in
-                    ( { model
-                        | --{ cachedPackages =
-                          --       Dict.union
-                          --           (Dict.map (\_ version -> FetchingZip version) majorOnly)
-                          --           model.cachedPackages
-                          todos = todosLeft
-                      }
-                    , cmd
-                      --, Dict.toList majorOnly
-                      --    |> List.indexedMap
-                      --        (\index ( ( packageName, _ ), version ) ->
-                      --            Process.sleep (toFloat (index * 2000))
-                      --                |> Task.andThen (\() -> getPackageEndpoint packageName version)
-                      --                |> Task.andThen getPackageZip
-                      --                |> Task.attempt (FetchedZipResult packageName version)
-                      --        )
-                      --    |> Cmd.batch
-                    )
+                    ( { model | todos = todosLeft }, cmd )
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -204,17 +256,22 @@ update msg model =
                     Dict.update
                         packageName
                         (\maybeValue ->
-                            let
-                                value =
-                                    Maybe.withDefault [] maybeValue
-                            in
                             (case result of
-                                Ok zip ->
-                                    FetchedAndChecked version zip (checkPackage model.cachedPackages zip) :: value
+                                Ok ( zip, docs, Elm.Project.Package elmJson ) ->
+                                    FetchedAndChecked
+                                        { version = version
+                                        , docs = docs
+                                        , elmJson = elmJson
+                                        , result = checkPackage model.cachedPackages zip
+                                        }
+
+                                Ok ( _, _, Elm.Project.Application _ ) ->
+                                    FetchingZipFailed version (Http.BadBody "Invalid elm.json type")
 
                                 Err error ->
-                                    FetchingZipFailed version error :: value
+                                    FetchingZipFailed version error
                             )
+                                :: Maybe.withDefault [] maybeValue
                                 |> Just
                         )
                         model.cachedPackages
@@ -231,6 +288,8 @@ nextTodo todos =
             ( rest
             , getPackageEndpoint packageName version
                 |> Task.andThen getPackageZip
+                |> Task.andThen (\zip -> getPackageDocs packageName version |> Task.map (Tuple.pair zip))
+                |> Task.andThen (\( zip, docs ) -> getPackageElmJson packageName version |> Task.map (\elmJson -> ( zip, docs, elmJson )))
                 |> Task.attempt (FetchedZipResult packageName version)
             )
 
@@ -238,53 +297,58 @@ nextTodo todos =
             ( todos, Cmd.none )
 
 
+project : Zip -> Review.Project.Project
+project zip =
+    List.foldl
+        (\zipEntry project_ ->
+            if Zip.Entry.isDirectory zipEntry then
+                project_
+
+            else
+                case
+                    ( String.split "/" (Zip.Entry.path zipEntry) |> List.Nonempty.fromList
+                    , Zip.Entry.toString zipEntry
+                    )
+                of
+                    ( Just nonemptyPath, Ok source ) ->
+                        if List.Nonempty.last nonemptyPath == "elm.json" then
+                            case Json.Decode.decodeString Elm.Project.decoder source of
+                                Ok elmJsonProject ->
+                                    Review.Project.addElmJson
+                                        { path = Zip.Entry.path zipEntry |> Debug.log "path ", raw = source, project = elmJsonProject }
+                                        project_
+
+                                Err _ ->
+                                    project_
+
+                        else if List.Nonempty.last nonemptyPath |> String.endsWith ".elm" |> (==) True then
+                            Review.Project.addModule
+                                { path = Zip.Entry.path zipEntry
+                                , source = source
+                                }
+                                project_
+
+                        else
+                            let
+                                _ =
+                                    Debug.log "project2_" nonemptyPath
+                            in
+                            project_
+
+                    _ ->
+                        Debug.log "project_" project_
+        )
+        Review.Project.new
+        (Zip.ls zip)
+
+
 checkPackage : Dict String (List PackageStatus) -> Zip -> Result CheckError (List Review.Rule.ReviewError)
 checkPackage cached zip =
     let
-        project : Review.Project.Project
-        project =
-            List.foldl
-                (\zipEntry project_ ->
-                    if Zip.Entry.isDirectory zipEntry then
-                        project_
-
-                    else
-                        case ( String.split "/" (Zip.Entry.path zipEntry), Zip.Entry.toString zipEntry ) of
-                            ( "src" :: next :: restOfPath, Ok source ) ->
-                                let
-                                    ( last, middle ) =
-                                        List.unconsLast (next :: restOfPath) |> Maybe.withDefault ( next, [] )
-
-                                    moduleName =
-                                        String.split "." last |> List.head |> Maybe.withDefault ""
-                                in
-                                Review.Project.addModule
-                                    { path = String.join "." middle ++ "." ++ moduleName
-                                    , source = source
-                                    }
-                                    project_
-
-                            ( path, Ok source ) ->
-                                if List.last path |> (==) (Just "elm.json") then
-                                    case Json.Decode.decodeString Elm.Project.decoder source of
-                                        Ok elmJsonProject ->
-                                            Review.Project.addElmJson
-                                                { path = Zip.Entry.path zipEntry |> Debug.log "path ", raw = source, project = elmJsonProject }
-                                                project_
-
-                                        Err _ ->
-                                            project_
-
-                                else
-                                    project_
-
-                            _ ->
-                                project_
-                )
-                Review.Project.new
-                (Zip.ls zip)
+        project_ =
+            project zip
     in
-    case Review.Project.elmJson project of
+    case Review.Project.elmJson project_ of
         Just elmJson ->
             case elmJson.project of
                 Elm.Project.Package packageInfo ->
@@ -298,14 +362,16 @@ checkPackage cached zip =
                                             case
                                                 List.filterMap
                                                     (\package ->
-                                                        if
-                                                            Elm.Constraint.check
-                                                                (Types.packageVersion package)
-                                                                constraint
-                                                        then
-                                                            Maybe.map
-                                                                (Tuple.pair (Types.packageVersion package))
-                                                                (Types.packageZip package)
+                                                        if Elm.Constraint.check (Types.packageVersion package) constraint then
+                                                            case package of
+                                                                FetchedAndChecked data ->
+                                                                    Just
+                                                                        ( Types.packageVersion package
+                                                                        , ( data.elmJson, data.docs )
+                                                                        )
+
+                                                                FetchingZipFailed _ _ ->
+                                                                    Nothing
 
                                                         else
                                                             Nothing
@@ -313,8 +379,8 @@ checkPackage cached zip =
                                                     packages
                                                     |> List.maximumWith (\( a, _ ) ( b, _ ) -> Version.compare a b)
                                             of
-                                                Just ( _, zip_ ) ->
-                                                    addDependency zip_ state
+                                                Just ( _, ( elmJson_, docs_ ) ) ->
+                                                    addDependency elmJson_ docs_ state
 
                                                 Nothing ->
                                                     state
@@ -322,10 +388,13 @@ checkPackage cached zip =
                                         Nothing ->
                                             state
                                 )
-                                project
+                                project_
                                 packageInfo.deps
                     in
-                    Review.Rule.reviewV2 [ NoUnused.Dependencies.rule ] Nothing (Debug.log "project" projectWithDependencies)
+                    Review.Rule.reviewV2
+                        [ NoUnused.Dependencies.rule ]
+                        Nothing
+                        (Debug.log "project" projectWithDependencies)
                         |> .errors
                         |> Debug.log ("errors " ++ elmJson.path ++ "   ")
                         |> Ok
@@ -337,72 +406,14 @@ checkPackage cached zip =
             Err ElmJsonMissing
 
 
-addDependency : Zip -> Review.Project.Project -> Review.Project.Project
-addDependency zip project =
-    let
-        data =
-            List.foldl
-                (\zipEntry data_ ->
-                    if Zip.Entry.isDirectory zipEntry then
-                        data_
-
-                    else
-                        case ( String.split "/" (Zip.Entry.path zipEntry), Zip.Entry.toString zipEntry ) of
-                            ( path, Ok source ) ->
-                                if List.last path |> (==) (Just "elm.json") then
-                                    case Json.Decode.decodeString Elm.Project.decoder source of
-                                        Ok (Elm.Project.Package elmJsonProject) ->
-                                            { data_
-                                                | elmJson = Just (Elm.Project.Package elmJsonProject)
-                                                , name = Elm.Package.toString elmJsonProject.name |> Just
-                                            }
-
-                                        _ ->
-                                            data_
-
-                                else if List.last path |> (==) (Just "docs.json") then
-                                    case Json.Decode.decodeString (Json.Decode.list Elm.Docs.decoder) source of
-                                        Ok elmJsonProjects ->
-                                            { data_ | modules = elmJsonProjects ++ data_.modules }
-
-                                        Err _ ->
-                                            data_
-
-                                else
-                                    data_
-
-                            _ ->
-                                data_
-                )
-                { name = Nothing, elmJson = Nothing, modules = [] }
-                (Zip.ls zip)
-                |> Debug.log "dependencyData"
-    in
-    case
-        Maybe.map2
-            (\name elmJson -> Review.Project.Dependency.create name elmJson data.modules)
-            data.name
-            data.elmJson
-            |> Debug.log "dependency"
-    of
-        Just dependency ->
-            Review.Project.addDependency dependency project
-
-        Nothing ->
-            project
-
-
-majorVersion : Constraint -> Int
-majorVersion constraint =
-    Elm.Constraint.toString constraint
-        |> String.split " "
-        |> List.head
-        |> Maybe.andThen String.toInt
-        |> Maybe.withDefault 1
+addDependency : Elm.Project.PackageInfo -> List Elm.Docs.Module -> Review.Project.Project -> Review.Project.Project
+addDependency elmJson docs =
+    Review.Project.addDependency
+        (Review.Project.Dependency.create (Elm.Package.toString elmJson.name) (Elm.Project.Package elmJson) docs)
 
 
 updateFromFrontend : SessionId -> ClientId -> ToBackend -> Model -> ( Model, Cmd BackendMsg )
-updateFromFrontend sessionId clientId msg model =
+updateFromFrontend _ _ msg model =
     case msg of
         NoOpToBackend ->
             ( model, Cmd.none )

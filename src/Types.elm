@@ -3,6 +3,8 @@ module Types exposing (..)
 import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
+import Elm.Docs
+import Elm.Project
 import Elm.Version exposing (Version)
 import Http
 import Review.Rule
@@ -17,7 +19,12 @@ type alias FrontendModel =
 
 
 type PackageStatus
-    = FetchedAndChecked Version Zip (Result CheckError (List Review.Rule.ReviewError))
+    = FetchedAndChecked
+        { version : Version
+        , docs : List Elm.Docs.Module
+        , elmJson : Elm.Project.PackageInfo
+        , result : Result CheckError (List Review.Rule.ReviewError)
+        }
     | FetchingZipFailed Version Http.Error
 
 
@@ -29,21 +36,11 @@ type CheckError
 packageVersion : PackageStatus -> Version
 packageVersion packageStatus =
     case packageStatus of
-        FetchedAndChecked version _ _ ->
+        FetchedAndChecked { version } ->
             version
 
         FetchingZipFailed version _ ->
             version
-
-
-packageZip : PackageStatus -> Maybe Zip
-packageZip packageStatus =
-    case packageStatus of
-        FetchedAndChecked _ zip _ ->
-            Just zip
-
-        FetchingZipFailed _ _ ->
-            Nothing
 
 
 type alias BackendModel =
@@ -64,7 +61,7 @@ type ToBackend
 
 type BackendMsg
     = GotNewPackagePreviews (Result Http.Error (List ( String, Version )))
-    | FetchedZipResult String Version (Result Http.Error Zip)
+    | FetchedZipResult String Version (Result Http.Error ( Zip, List Elm.Docs.Module, Elm.Project.Project ))
 
 
 type ToFrontend
