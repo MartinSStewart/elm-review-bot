@@ -262,7 +262,7 @@ update msg model =
                                         { version = version
                                         , docs = docs
                                         , elmJson = elmJson
-                                        , result = checkPackage model.cachedPackages zip
+                                        , result = checkPackage elmJson model.cachedPackages zip
                                         }
 
                                 Ok ( _, _, Elm.Project.Application _ ) ->
@@ -306,7 +306,7 @@ project zip =
 
             else
                 case
-                    ( String.split "/" (Zip.Entry.path zipEntry) |> List.Nonempty.fromList
+                    ( String.split "/" (Zip.Entry.path zipEntry |> Debug.log "path") |> List.Nonempty.fromList
                     , Zip.Entry.toString zipEntry
                     )
                 of
@@ -315,13 +315,16 @@ project zip =
                             case Json.Decode.decodeString Elm.Project.decoder source of
                                 Ok elmJsonProject ->
                                     Review.Project.addElmJson
-                                        { path = Zip.Entry.path zipEntry |> Debug.log "path ", raw = source, project = elmJsonProject }
+                                        { path = Zip.Entry.path zipEntry, raw = source, project = elmJsonProject }
                                         project_
 
                                 Err _ ->
                                     project_
 
-                        else if List.Nonempty.last nonemptyPath |> String.endsWith ".elm" |> (==) True then
+                        else if
+                            String.endsWith ".elm" (List.Nonempty.last nonemptyPath)
+                                && (List.Nonempty.get 1 nonemptyPath == "src" || List.Nonempty.get 1 nonemptyPath == "tests")
+                        then
                             Review.Project.addModule
                                 { path = Zip.Entry.path zipEntry
                                 , source = source
@@ -329,81 +332,63 @@ project zip =
                                 project_
 
                         else
-                            let
-                                _ =
-                                    Debug.log "project2_" nonemptyPath
-                            in
                             project_
 
                     _ ->
-                        Debug.log "project_" project_
+                        project_
         )
         Review.Project.new
         (Zip.ls zip)
 
 
-checkPackage : Dict String (List PackageStatus) -> Zip -> Result CheckError (List Review.Rule.ReviewError)
-checkPackage cached zip =
+checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result CheckError (List Review.Rule.ReviewError)
+checkPackage elmJson cached zip =
     let
-        project_ =
-            project zip
+        projectWithDependencies : Review.Project.Project
+        projectWithDependencies =
+            List.foldl
+                (\( packageName, constraint ) state ->
+                    case Dict.get (Elm.Package.toString packageName) cached of
+                        Just packages ->
+                            case
+                                List.filterMap
+                                    (\package ->
+                                        if Elm.Constraint.check (Types.packageVersion package) constraint then
+                                            case package of
+                                                FetchedAndChecked data ->
+                                                    Just
+                                                        ( Types.packageVersion package
+                                                        , ( data.elmJson, data.docs )
+                                                        )
+
+                                                FetchingZipFailed _ _ ->
+                                                    Nothing
+
+                                        else
+                                            Nothing
+                                    )
+                                    packages
+                                    |> List.maximumWith (\( a, _ ) ( b, _ ) -> Version.compare a b)
+                            of
+                                Just ( _, ( elmJson_, docs_ ) ) ->
+                                    addDependency elmJson_ docs_ state
+
+                                Nothing ->
+                                    state
+
+                        Nothing ->
+                            state
+                )
+                (project zip)
+                elmJson.deps
     in
-    case Review.Project.elmJson project_ of
-        Just elmJson ->
-            case elmJson.project of
-                Elm.Project.Package packageInfo ->
-                    let
-                        projectWithDependencies : Review.Project.Project
-                        projectWithDependencies =
-                            List.foldl
-                                (\( packageName, constraint ) state ->
-                                    case Dict.get (Elm.Package.toString packageName) cached of
-                                        Just packages ->
-                                            case
-                                                List.filterMap
-                                                    (\package ->
-                                                        if Elm.Constraint.check (Types.packageVersion package) constraint then
-                                                            case package of
-                                                                FetchedAndChecked data ->
-                                                                    Just
-                                                                        ( Types.packageVersion package
-                                                                        , ( data.elmJson, data.docs )
-                                                                        )
-
-                                                                FetchingZipFailed _ _ ->
-                                                                    Nothing
-
-                                                        else
-                                                            Nothing
-                                                    )
-                                                    packages
-                                                    |> List.maximumWith (\( a, _ ) ( b, _ ) -> Version.compare a b)
-                                            of
-                                                Just ( _, ( elmJson_, docs_ ) ) ->
-                                                    addDependency elmJson_ docs_ state
-
-                                                Nothing ->
-                                                    state
-
-                                        Nothing ->
-                                            state
-                                )
-                                project_
-                                packageInfo.deps
-                    in
-                    Review.Rule.reviewV2
-                        [ NoUnused.Dependencies.rule ]
-                        Nothing
-                        (Debug.log "project" projectWithDependencies)
-                        |> .errors
-                        |> Debug.log ("errors " ++ elmJson.path ++ "   ")
-                        |> Ok
-
-                Elm.Project.Application _ ->
-                    Err ElmJsonIsForApplication
-
-        Nothing ->
-            Err ElmJsonMissing
+    Review.Rule.reviewV2
+        [ NoUnused.Dependencies.rule ]
+        Nothing
+        (Debug.log "project" projectWithDependencies)
+        |> .errors
+        |> Debug.log ("errors " ++ Elm.Package.toString elmJson.name ++ "   ")
+        |> Ok
 
 
 addDependency : Elm.Project.PackageInfo -> List Elm.Docs.Module -> Review.Project.Project -> Review.Project.Project
