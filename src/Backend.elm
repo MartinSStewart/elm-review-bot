@@ -8,6 +8,7 @@ import Elm.Project
 import Elm.Version as Version exposing (Version)
 import Http
 import Json.Decode exposing (Decoder)
+import Json.Encode
 import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
 import List.Nonempty
@@ -15,14 +16,11 @@ import NoUnused.Dependencies
 import Review.Project
 import Review.Project.Dependency
 import Review.Rule
+import Set
 import Task exposing (Task)
 import Types exposing (..)
 import Zip exposing (Zip)
 import Zip.Entry
-
-
-type alias Model =
-    BackendModel
 
 
 decodeAllPackages : Decoder (List ( String, Version ))
@@ -217,13 +215,18 @@ app =
         { init = init
         , update = update
         , updateFromFrontend = updateFromFrontend
-        , subscriptions = \_ -> Sub.none
+        , subscriptions =
+            \_ ->
+                Sub.batch
+                    [ Lamdera.onConnect ClientConnected
+                    , Lamdera.onDisconnect ClientDisconnected
+                    ]
         }
 
 
-init : ( Model, Cmd BackendMsg )
+init : ( BackendModel, Cmd BackendMsg )
 init =
-    ( { cachedPackages = Dict.empty, todos = [] }
+    ( { cachedPackages = Dict.empty, todos = [], clients = Set.empty }
     , getAllPackages packageCountOffset
     )
 
@@ -232,7 +235,7 @@ packageCountOffset =
     6557
 
 
-update : BackendMsg -> Model -> ( Model, Cmd BackendMsg )
+update : BackendMsg -> BackendModel -> ( BackendModel, Cmd BackendMsg )
 update msg model =
     case msg of
         GotNewPackagePreviews result ->
@@ -240,49 +243,69 @@ update msg model =
                 Ok newPackages ->
                     let
                         ( todosLeft, cmd ) =
-                            nextTodo (model.todos ++ newPackages)
+                            nextTodo
+                                (Dict.values model.cachedPackages |> List.map List.length |> List.sum)
+                                (model.todos ++ newPackages)
                     in
                     ( { model | todos = todosLeft }, cmd )
 
                 Err _ ->
                     ( model, Cmd.none )
 
-        FetchedZipResult packageName version result ->
+        FetchedZipResult packageName version index result ->
             let
                 ( todosLeft, cmd ) =
-                    nextTodo model.todos
+                    nextTodo (Dict.size model.cachedPackages) model.todos
+
+                packageStatus =
+                    case result of
+                        Ok ( zip, docs, Elm.Project.Package elmJson ) ->
+                            FetchedAndChecked
+                                { version = version
+                                , index = index
+                                , docs = docs
+                                , elmJson = elmJson
+                                , errors = checkPackage elmJson model.cachedPackages zip
+                                }
+
+                        Ok ( _, _, Elm.Project.Application _ ) ->
+                            FetchingZipFailed version index (Http.BadBody "Invalid elm.json type")
+
+                        Err error ->
+                            FetchingZipFailed version index error
             in
-            ( { cachedPackages =
+            ( { model
+                | cachedPackages =
                     Dict.update
                         packageName
-                        (\maybeValue ->
-                            (case result of
-                                Ok ( zip, docs, Elm.Project.Package elmJson ) ->
-                                    FetchedAndChecked
-                                        { version = version
-                                        , docs = docs
-                                        , elmJson = elmJson
-                                        , result = checkPackage elmJson model.cachedPackages zip
-                                        }
-
-                                Ok ( _, _, Elm.Project.Application _ ) ->
-                                    FetchingZipFailed version (Http.BadBody "Invalid elm.json type")
-
-                                Err error ->
-                                    FetchingZipFailed version error
-                            )
-                                :: Maybe.withDefault [] maybeValue
-                                |> Just
-                        )
+                        (\maybeValue -> packageStatus :: Maybe.withDefault [] maybeValue |> Just)
                         model.cachedPackages
-              , todos = todosLeft
+                , todos = todosLeft
               }
             , cmd
+                :: List.map
+                    (\client ->
+                        Dict.singleton packageName [ Types.statusToStatusFrontend packageStatus ]
+                            |> Updates
+                            |> Lamdera.sendToFrontend client
+                    )
+                    (Set.toList model.clients)
+                |> Cmd.batch
             )
 
+        ClientConnected _ clientId ->
+            ( { model | clients = Set.insert clientId model.clients }
+            , Dict.map (\_ value -> List.map statusToStatusFrontend value) model.cachedPackages
+                |> Updates
+                |> Lamdera.sendToFrontend clientId
+            )
 
-nextTodo : List ( String, Version ) -> ( List ( String, Version ), Cmd BackendMsg )
-nextTodo todos =
+        ClientDisconnected _ clientId ->
+            ( { model | clients = Set.remove clientId model.clients }, Cmd.none )
+
+
+nextTodo : Int -> List ( String, Version ) -> ( List ( String, Version ), Cmd BackendMsg )
+nextTodo count todos =
     case todos of
         ( packageName, version ) :: rest ->
             ( rest
@@ -290,15 +313,15 @@ nextTodo todos =
                 |> Task.andThen getPackageZip
                 |> Task.andThen (\zip -> getPackageDocs packageName version |> Task.map (Tuple.pair zip))
                 |> Task.andThen (\( zip, docs ) -> getPackageElmJson packageName version |> Task.map (\elmJson -> ( zip, docs, elmJson )))
-                |> Task.attempt (FetchedZipResult packageName version)
+                |> Task.attempt (FetchedZipResult packageName version count)
             )
 
         [] ->
             ( todos, Cmd.none )
 
 
-project : Zip -> Review.Project.Project
-project zip =
+project : Elm.Project.PackageInfo -> Zip -> Review.Project.Project
+project elmJson zip =
     List.foldl
         (\zipEntry project_ ->
             if Zip.Entry.isDirectory zipEntry then
@@ -306,22 +329,12 @@ project zip =
 
             else
                 case
-                    ( String.split "/" (Zip.Entry.path zipEntry |> Debug.log "path") |> List.Nonempty.fromList
+                    ( String.split "/" (Zip.Entry.path zipEntry) |> List.Nonempty.fromList
                     , Zip.Entry.toString zipEntry
                     )
                 of
                     ( Just nonemptyPath, Ok source ) ->
-                        if List.Nonempty.last nonemptyPath == "elm.json" then
-                            case Json.Decode.decodeString Elm.Project.decoder source of
-                                Ok elmJsonProject ->
-                                    Review.Project.addElmJson
-                                        { path = Zip.Entry.path zipEntry, raw = source, project = elmJsonProject }
-                                        project_
-
-                                Err _ ->
-                                    project_
-
-                        else if
+                        if
                             String.endsWith ".elm" (List.Nonempty.last nonemptyPath)
                                 && (List.Nonempty.get 1 nonemptyPath == "src" || List.Nonempty.get 1 nonemptyPath == "tests")
                         then
@@ -339,9 +352,14 @@ project zip =
         )
         Review.Project.new
         (Zip.ls zip)
+        |> Review.Project.addElmJson
+            { path = "src/elm.json"
+            , raw = Elm.Project.Package elmJson |> Elm.Project.encode |> Json.Encode.encode 0
+            , project = Elm.Project.Package elmJson
+            }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result CheckError (List Review.Rule.ReviewError)
+checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> List Review.Rule.ReviewError
 checkPackage elmJson cached zip =
     let
         projectWithDependencies : Review.Project.Project
@@ -361,7 +379,7 @@ checkPackage elmJson cached zip =
                                                         , ( data.elmJson, data.docs )
                                                         )
 
-                                                FetchingZipFailed _ _ ->
+                                                FetchingZipFailed _ _ _ ->
                                                     Nothing
 
                                         else
@@ -379,16 +397,20 @@ checkPackage elmJson cached zip =
                         Nothing ->
                             state
                 )
-                (project zip)
+                (project elmJson zip)
                 elmJson.deps
     in
-    Review.Rule.reviewV2
-        [ NoUnused.Dependencies.rule ]
-        Nothing
-        (Debug.log "project" projectWithDependencies)
-        |> .errors
-        |> Debug.log ("errors " ++ Elm.Package.toString elmJson.name ++ "   ")
-        |> Ok
+    case Version.fromTuple ( 0, 19, 1 ) of
+        Just version ->
+            if Elm.Constraint.check version elmJson.elm then
+                Review.Rule.reviewV2 [ NoUnused.Dependencies.rule ] Nothing projectWithDependencies
+                    |> .errors
+
+            else
+                []
+
+        Nothing ->
+            []
 
 
 addDependency : Elm.Project.PackageInfo -> List Elm.Docs.Module -> Review.Project.Project -> Review.Project.Project
@@ -397,7 +419,7 @@ addDependency elmJson docs =
         (Review.Project.Dependency.create (Elm.Package.toString elmJson.name) (Elm.Project.Package elmJson) docs)
 
 
-updateFromFrontend : SessionId -> ClientId -> ToBackend -> Model -> ( Model, Cmd BackendMsg )
+updateFromFrontend : SessionId -> ClientId -> ToBackend -> BackendModel -> ( BackendModel, Cmd BackendMsg )
 updateFromFrontend _ _ msg model =
     case msg of
         NoOpToBackend ->

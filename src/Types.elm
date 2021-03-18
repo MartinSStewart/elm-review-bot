@@ -7,30 +7,57 @@ import Elm.Docs
 import Elm.Project
 import Elm.Version exposing (Version)
 import Http
+import Lamdera exposing (ClientId, SessionId)
 import Review.Rule
+import Set exposing (Set)
 import Url exposing (Url)
 import Zip exposing (Zip)
 
 
 type alias FrontendModel =
-    { key : Key
-    , message : String
+    { state : Dict String (List PackageStatusFrontend)
+    , key : Key
+    , order : DisplayOrder
     }
+
+
+type DisplayOrder
+    = RequestOrder
+    | Alphabetical
 
 
 type PackageStatus
     = FetchedAndChecked
         { version : Version
+        , index : Int
         , docs : List Elm.Docs.Module
         , elmJson : Elm.Project.PackageInfo
-        , result : Result CheckError (List Review.Rule.ReviewError)
+        , errors : List Review.Rule.ReviewError
         }
-    | FetchingZipFailed Version Http.Error
+    | FetchingZipFailed Version Int Http.Error
 
 
-type CheckError
-    = ElmJsonMissing
-    | ElmJsonIsForApplication
+type PackageStatusFrontend
+    = FetchedAndChecked_
+        { version : Version
+        , index : Int
+        , errors : List Review.Rule.ReviewError
+        }
+    | FetchingZipFailed_ Version Int Http.Error
+
+
+statusToStatusFrontend : PackageStatus -> PackageStatusFrontend
+statusToStatusFrontend packageStatus =
+    case packageStatus of
+        FetchedAndChecked { version, index, errors } ->
+            FetchedAndChecked_
+                { version = version
+                , index = index
+                , errors = errors
+                }
+
+        FetchingZipFailed version index error ->
+            FetchingZipFailed_ version index error
 
 
 packageVersion : PackageStatus -> Version
@@ -39,19 +66,41 @@ packageVersion packageStatus =
         FetchedAndChecked { version } ->
             version
 
-        FetchingZipFailed version _ ->
+        FetchingZipFailed version _ _ ->
             version
+
+
+packageVersion_ : PackageStatusFrontend -> Version
+packageVersion_ packageStatus =
+    case packageStatus of
+        FetchedAndChecked_ { version } ->
+            version
+
+        FetchingZipFailed_ version _ _ ->
+            version
+
+
+packageIndex : PackageStatusFrontend -> Int
+packageIndex packageStatus =
+    case packageStatus of
+        FetchedAndChecked_ { index } ->
+            index
+
+        FetchingZipFailed_ _ index _ ->
+            index
 
 
 type alias BackendModel =
     { cachedPackages : Dict String (List PackageStatus)
     , todos : List ( String, Version )
+    , clients : Set String
     }
 
 
 type FrontendMsg
     = UrlClicked UrlRequest
     | UrlChanged Url
+    | ToggleOrder
     | NoOpFrontendMsg
 
 
@@ -61,11 +110,13 @@ type ToBackend
 
 type BackendMsg
     = GotNewPackagePreviews (Result Http.Error (List ( String, Version )))
-    | FetchedZipResult String Version (Result Http.Error ( Zip, List Elm.Docs.Module, Elm.Project.Project ))
+    | FetchedZipResult String Version Int (Result Http.Error ( Zip, List Elm.Docs.Module, Elm.Project.Project ))
+    | ClientConnected SessionId ClientId
+    | ClientDisconnected SessionId ClientId
 
 
 type ToFrontend
-    = NoOpToFrontend
+    = Updates (Dict String (List PackageStatusFrontend))
 
 
 type alias PackageEndpoint =
