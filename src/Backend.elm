@@ -256,7 +256,9 @@ update msg model =
         FetchedZipResult packageName version index result ->
             let
                 ( todosLeft, cmd ) =
-                    nextTodo (Dict.size model.cachedPackages) model.todos
+                    nextTodo
+                        (Dict.values model.cachedPackages |> List.map List.length |> List.sum)
+                        model.todos
 
                 packageStatus =
                     case result of

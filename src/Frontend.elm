@@ -120,7 +120,7 @@ view model =
                             Element.Input.button
                                 buttonAttributes
                                 { onPress = Just ToggleOrder
-                                , label = Element.text "Show alphabetical"
+                                , label = Element.text "Show requested order"
                                 }
                     , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
                     ]
