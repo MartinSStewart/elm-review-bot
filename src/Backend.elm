@@ -359,7 +359,7 @@ project elmJson zip =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> List Review.Rule.ReviewError
+checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> List Error
 checkPackage elmJson cached zip =
     let
         projectWithDependencies : Review.Project.Project
@@ -405,6 +405,16 @@ checkPackage elmJson cached zip =
             if Elm.Constraint.check version elmJson.elm then
                 Review.Rule.reviewV2 [ NoUnused.Dependencies.rule ] Nothing projectWithDependencies
                     |> .errors
+                    |> List.map
+                        (\error ->
+                            { message = Review.Rule.errorMessage error
+                            , ruleName = Review.Rule.errorRuleName error
+                            , filePath = Review.Rule.errorFilePath error
+                            , details = Review.Rule.errorDetails error
+                            , range = Review.Rule.errorRange error
+                            , fixes = Review.Rule.errorFixes error
+                            }
+                        )
 
             else
                 []

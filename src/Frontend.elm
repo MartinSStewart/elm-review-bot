@@ -212,14 +212,10 @@ packageView packageName status =
 
                     _ ->
                         List.map
-                            (\error ->
+                            (\{ ruleName, message } ->
                                 Element.paragraph
                                     []
-                                    [ Element.text <|
-                                        Review.Rule.errorRuleName error
-                                            ++ ": "
-                                            ++ Review.Rule.errorMessage error
-                                    ]
+                                    [ Element.text <| ruleName ++ ": " ++ message ]
                             )
                             errors
                             |> Element.column [ errorColor ]

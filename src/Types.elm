@@ -5,9 +5,11 @@ import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
 import Elm.Docs
 import Elm.Project
+import Elm.Syntax.Range exposing (Range)
 import Elm.Version exposing (Version)
 import Http
 import Lamdera exposing (ClientId, SessionId)
+import Review.Fix exposing (Fix)
 import Review.Rule
 import Set exposing (Set)
 import Url exposing (Url)
@@ -18,6 +20,16 @@ type alias FrontendModel =
     { state : Dict String (List PackageStatusFrontend)
     , key : Key
     , order : DisplayOrder
+    }
+
+
+type alias Error =
+    { message : String
+    , ruleName : String
+    , filePath : String
+    , details : List String
+    , range : Range
+    , fixes : Maybe (List Fix)
     }
 
 
@@ -32,7 +44,7 @@ type PackageStatus
         , index : Int
         , docs : List Elm.Docs.Module
         , elmJson : Elm.Project.PackageInfo
-        , errors : List Review.Rule.ReviewError
+        , errors : List Error
         }
     | FetchingZipFailed Version Int Http.Error
 
@@ -41,7 +53,7 @@ type PackageStatusFrontend
     = FetchedAndChecked_
         { version : Version
         , index : Int
-        , errors : List Review.Rule.ReviewError
+        , errors : List Error
         }
     | FetchingZipFailed_ Version Int Http.Error
 
