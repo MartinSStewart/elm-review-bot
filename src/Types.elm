@@ -2,6 +2,7 @@ module Types exposing (..)
 
 import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
+import Bytes exposing (Bytes)
 import Dict exposing (Dict)
 import Elm.Docs
 import Elm.Project
@@ -10,10 +11,8 @@ import Elm.Version exposing (Version)
 import Http
 import Lamdera exposing (ClientId, SessionId)
 import Review.Fix exposing (Fix)
-import Review.Rule
 import Set exposing (Set)
 import Url exposing (Url)
-import Zip exposing (Zip)
 
 
 type alias FrontendModel =
@@ -29,7 +28,6 @@ type alias Error =
     , filePath : String
     , details : List String
     , range : Range
-    , fixes : Maybe (List Fix)
     }
 
 
@@ -122,7 +120,7 @@ type ToBackend
 
 type BackendMsg
     = GotNewPackagePreviews (Result Http.Error (List ( String, Version )))
-    | FetchedZipResult String Version Int (Result Http.Error ( Zip, List Elm.Docs.Module, Elm.Project.Project ))
+    | FetchedZipResult String Version Int (Result Http.Error ( Bytes, List Elm.Docs.Module, Elm.Project.Project ))
     | ClientConnected SessionId ClientId
     | ClientDisconnected SessionId ClientId
 

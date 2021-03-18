@@ -1,5 +1,6 @@
 module Backend exposing (..)
 
+import Bytes exposing (Bytes)
 import Dict exposing (Dict)
 import Elm.Constraint exposing (Constraint)
 import Elm.Docs
@@ -180,7 +181,7 @@ getPackageElmJson packageName version =
         }
 
 
-getPackageZip : PackageEndpoint -> Task Http.Error Zip
+getPackageZip : PackageEndpoint -> Task Http.Error Bytes
 getPackageZip packageEndpoint =
     Http.task
         { method = "GET"
@@ -204,7 +205,7 @@ getPackageZip packageEndpoint =
                             Http.BadStatus metadata.statusCode |> Err
 
                         Http.GoodStatus_ _ body ->
-                            Zip.fromBytes body |> Result.fromMaybe (Http.BadBody "Failed to open zip file.")
+                            Ok body
                 )
         , timeout = Nothing
         }
@@ -259,14 +260,19 @@ update msg model =
 
                 packageStatus =
                     case result of
-                        Ok ( zip, docs, Elm.Project.Package elmJson ) ->
-                            FetchedAndChecked
-                                { version = version
-                                , index = index
-                                , docs = docs
-                                , elmJson = elmJson
-                                , errors = checkPackage elmJson model.cachedPackages zip
-                                }
+                        Ok ( zipBytes, docs, Elm.Project.Package elmJson ) ->
+                            case Zip.fromBytes zipBytes of
+                                Just zip ->
+                                    FetchedAndChecked
+                                        { version = version
+                                        , index = index
+                                        , docs = docs
+                                        , elmJson = elmJson
+                                        , errors = checkPackage elmJson model.cachedPackages zip
+                                        }
+
+                                Nothing ->
+                                    FetchingZipFailed version index (Http.BadBody "Invalid zip")
 
                         Ok ( _, _, Elm.Project.Application _ ) ->
                             FetchingZipFailed version index (Http.BadBody "Invalid elm.json type")
@@ -312,7 +318,10 @@ nextTodo count todos =
             , getPackageEndpoint packageName version
                 |> Task.andThen getPackageZip
                 |> Task.andThen (\zip -> getPackageDocs packageName version |> Task.map (Tuple.pair zip))
-                |> Task.andThen (\( zip, docs ) -> getPackageElmJson packageName version |> Task.map (\elmJson -> ( zip, docs, elmJson )))
+                |> Task.andThen
+                    (\( bytes, docs ) ->
+                        getPackageElmJson packageName version |> Task.map (\elmJson -> ( bytes, docs, elmJson ))
+                    )
                 |> Task.attempt (FetchedZipResult packageName version count)
             )
 
@@ -412,7 +421,6 @@ checkPackage elmJson cached zip =
                             , filePath = Review.Rule.errorFilePath error
                             , details = Review.Rule.errorDetails error
                             , range = Review.Rule.errorRange error
-                            , fixes = Review.Rule.errorFixes error
                             }
                         )
 
