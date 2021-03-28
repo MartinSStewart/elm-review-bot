@@ -12,6 +12,7 @@ import Html
 import Html.Attributes as Attr
 import Http
 import Lamdera
+import List.Extra as List
 import Review.Rule
 import Types exposing (..)
 import Url
@@ -81,12 +82,12 @@ updateFromBackend msg model =
             ( { model
                 | state =
                     Dict.merge
-                        (\key a state -> Dict.insert key a state)
+                        (\_ _ state -> state)
                         (\key a new state -> Dict.insert key (a ++ new) state)
                         (\key new state -> Dict.insert key new state)
                         model.state
                         dict
-                        Dict.empty
+                        model.state
               }
             , Cmd.none
             )
@@ -136,10 +137,18 @@ packagesView model =
     Element.column
         []
         (Dict.toList model.state
-            |> List.concatMap (\( packageName, versions ) -> List.map (packageView packageName) versions)
+            |> List.concatMap
+                (\( packageName, versions ) ->
+                    case List.maximumBy Types.updateIndex versions |> Maybe.map (packageView packageName) of
+                        Just a ->
+                            [ a ]
+
+                        Nothing ->
+                            []
+                )
             |> (case model.order of
                     RequestOrder ->
-                        List.sortBy (\( a, _, _ ) -> Types.packageIndex a)
+                        List.sortBy (\( a, _, _ ) -> Types.updateIndex a)
 
                     Alphabetical ->
                         List.sortWith
@@ -166,10 +175,7 @@ packageView packageName status =
     , Element.column
         []
         [ Element.row [ Element.spacing 8 ]
-            [ Element.text packageName
-            , Element.el
-                [ Element.Font.color <| Element.rgb 0.2 0.2 0.2 ]
-                (Element.text (Types.packageVersion_ status |> Elm.Version.toString))
+            [ Element.text (packageName ++ " " ++ Elm.Version.toString (Types.packageVersion_ status))
             , case status of
                 FetchedAndChecked_ { errors } ->
                     case errors of
@@ -184,22 +190,16 @@ packageView packageName status =
                                 Element.none
 
                 FetchingZipFailed_ _ _ error ->
-                    (case error of
-                        Http.BadBody text ->
-                            text
+                    httpErrorToString error
+                        |> (++) "Http error: "
+                        |> Element.text
+                        |> Element.el [ errorColor ]
 
-                        Http.BadUrl url ->
-                            "Invalid url " ++ url
+                Fetched_ _ ->
+                    Element.text "Fetched"
 
-                        Http.Timeout ->
-                            "Timed out"
-
-                        Http.NetworkError ->
-                            "Network error"
-
-                        Http.BadStatus statusCode ->
-                            "Bad status code  " ++ String.fromInt statusCode
-                    )
+                FetchingElmJsonAndDocsFailed_ _ _ error ->
+                    httpErrorToString error
                         |> (++) "Http error: "
                         |> Element.text
                         |> Element.el [ errorColor ]
@@ -220,10 +220,28 @@ packageView packageName status =
                             errors
                             |> Element.column [ errorColor ]
 
-            FetchingZipFailed_ _ _ _ ->
+            _ ->
                 Element.none
         ]
     )
+
+
+httpErrorToString error =
+    case error of
+        Http.BadBody text ->
+            text
+
+        Http.BadUrl url ->
+            "Invalid url " ++ url
+
+        Http.Timeout ->
+            "Timed out"
+
+        Http.NetworkError ->
+            "Network error"
+
+        Http.BadStatus statusCode ->
+            "Bad status code  " ++ String.fromInt statusCode
 
 
 errorColor =

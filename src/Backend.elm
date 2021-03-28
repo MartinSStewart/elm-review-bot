@@ -227,7 +227,7 @@ app =
 
 init : ( BackendModel, Cmd BackendMsg )
 init =
-    ( { cachedPackages = Dict.empty, todos = [], clients = Set.empty }
+    ( { cachedPackages = Dict.empty, clients = Set.empty, updateIndex = 0 }
     , getAllPackages packageCountOffset
     )
 
@@ -243,67 +243,133 @@ update msg model =
             case result of
                 Ok newPackages ->
                     let
-                        ( todosLeft, cmd ) =
-                            nextTodo
-                                (Dict.values model.cachedPackages |> List.map List.length |> List.sum)
-                                (model.todos ++ newPackages)
+                        model2 =
+                            List.foldl
+                                (\( packageName, version ) state ->
+                                    { state
+                                        | cachedPackages =
+                                            Dict.update
+                                                packageName
+                                                (\maybeValue ->
+                                                    Pending version state.updateIndex
+                                                        :: Maybe.withDefault [] maybeValue
+                                                        |> Just
+                                                )
+                                                state.cachedPackages
+                                        , updateIndex = state.updateIndex + 1
+                                    }
+                                )
+                                model
+                                newPackages
                     in
-                    ( { model | todos = todosLeft }, cmd )
+                    ( model2
+                    , nextTodo model2
+                    )
 
                 Err _ ->
                     ( model, Cmd.none )
 
-        FetchedZipResult packageName version index result ->
+        FetchedElmJsonAndDocs { packageName, version } result ->
             let
-                ( todosLeft, cmd ) =
-                    nextTodo
-                        (Dict.values model.cachedPackages |> List.map List.length |> List.sum)
-                        model.todos
-
                 packageStatus =
                     case result of
-                        Ok ( zipBytes, docs, Elm.Project.Package elmJson ) ->
+                        Ok ( Elm.Project.Package elmJson, docs ) ->
+                            Fetched
+                                { version = version
+                                , updateIndex = model.updateIndex
+                                , docs = docs
+                                , elmJson = elmJson
+                                }
+
+                        Ok ( Elm.Project.Application _, _ ) ->
+                            FetchingElmJsonAndDocsFailed
+                                version
+                                model.updateIndex
+                                (Http.BadBody "Invalid elm.json package type")
+
+                        Err error ->
+                            FetchingElmJsonAndDocsFailed version model.updateIndex error
+
+                model2 =
+                    { model
+                        | cachedPackages =
+                            Dict.update
+                                packageName
+                                (Maybe.map (List.setIf (Types.packageVersion >> (==) version) packageStatus))
+                                model.cachedPackages
+                        , updateIndex = model.updateIndex + 1
+                    }
+            in
+            ( model2
+            , Cmd.batch
+                (nextTodo model2
+                    :: List.map
+                        (\client ->
+                            Lamdera.sendToFrontend
+                                client
+                                (Updates
+                                    (Dict.singleton
+                                        packageName
+                                        (List.filterMap Types.statusToStatusFrontend [ packageStatus ])
+                                    )
+                                )
+                        )
+                        (Set.toList model2.clients)
+                )
+            )
+
+        FetchedZipResult { packageName, version } elmJson docs result ->
+            let
+                packageStatus =
+                    case ( result, elmJson ) of
+                        ( Ok zipBytes, elmJson_ ) ->
                             case Zip.fromBytes zipBytes of
                                 Just zip ->
                                     FetchedAndChecked
                                         { version = version
-                                        , index = index
+                                        , updateIndex = model.updateIndex
                                         , docs = docs
-                                        , elmJson = elmJson
-                                        , errors = checkPackage elmJson model.cachedPackages zip
+                                        , elmJson = elmJson_
+                                        , errors = checkPackage elmJson_ model.cachedPackages zip
                                         }
 
                                 Nothing ->
-                                    FetchingZipFailed version index (Http.BadBody "Invalid zip")
+                                    FetchingZipFailed version model.updateIndex (Http.BadBody "Invalid zip")
 
-                        Ok ( _, _, Elm.Project.Application _ ) ->
-                            FetchingZipFailed version index (Http.BadBody "Invalid elm.json type")
+                        ( Err error, _ ) ->
+                            FetchingZipFailed version model.updateIndex error
 
-                        Err error ->
-                            FetchingZipFailed version index error
+                model2 =
+                    { model
+                        | cachedPackages =
+                            Dict.update
+                                packageName
+                                (Maybe.map (List.setIf (Types.packageVersion >> (==) version) packageStatus))
+                                model.cachedPackages
+                        , updateIndex = model.updateIndex + 1
+                    }
             in
-            ( { model
-                | cachedPackages =
-                    Dict.update
-                        packageName
-                        (\maybeValue -> packageStatus :: Maybe.withDefault [] maybeValue |> Just)
-                        model.cachedPackages
-                , todos = todosLeft
-              }
-            , cmd
-                :: List.map
-                    (\client ->
-                        Dict.singleton packageName [ Types.statusToStatusFrontend packageStatus ]
-                            |> Updates
-                            |> Lamdera.sendToFrontend client
-                    )
-                    (Set.toList model.clients)
-                |> Cmd.batch
+            ( model2
+            , Cmd.batch
+                (nextTodo model2
+                    :: List.map
+                        (\client ->
+                            Lamdera.sendToFrontend
+                                client
+                                (Updates
+                                    (Dict.singleton
+                                        packageName
+                                        (List.filterMap Types.statusToStatusFrontend [ packageStatus ])
+                                    )
+                                )
+                        )
+                        (Set.toList model2.clients)
+                )
             )
 
         ClientConnected _ clientId ->
             ( { model | clients = Set.insert clientId model.clients }
-            , Dict.map (\_ value -> List.map statusToStatusFrontend value) model.cachedPackages
+            , Dict.map (\_ value -> List.filterMap statusToStatusFrontend value) model.cachedPackages
                 |> Updates
                 |> Lamdera.sendToFrontend clientId
             )
@@ -312,23 +378,73 @@ update msg model =
             ( { model | clients = Set.remove clientId model.clients }, Cmd.none )
 
 
-nextTodo : Int -> List ( String, Version ) -> ( List ( String, Version ), Cmd BackendMsg )
-nextTodo count todos =
-    case todos of
-        ( packageName, version ) :: rest ->
-            ( rest
-            , getPackageEndpoint packageName version
-                |> Task.andThen getPackageZip
-                |> Task.andThen (\zip -> getPackageDocs packageName version |> Task.map (Tuple.pair zip))
-                |> Task.andThen
-                    (\( bytes, docs ) ->
-                        getPackageElmJson packageName version |> Task.map (\elmJson -> ( bytes, docs, elmJson ))
-                    )
-                |> Task.attempt (FetchedZipResult packageName version count)
-            )
+nextTodo : BackendModel -> Cmd BackendMsg
+nextTodo model =
+    let
+        maybeNextTodo : Maybe ( String, PackageStatus )
+        maybeNextTodo =
+            Dict.foldl
+                (\packageName versions currentTodo ->
+                    List.foldl
+                        (\packageStatus currentTodo_ ->
+                            case packageStatus of
+                                Pending _ _ ->
+                                    Just ( packageName, packageStatus )
 
-        [] ->
-            ( todos, Cmd.none )
+                                Fetched { version } ->
+                                    case currentTodo_ of
+                                        Just ( _, Pending _ _ ) ->
+                                            currentTodo_
+
+                                        _ ->
+                                            if
+                                                List.count
+                                                    (Types.packageVersion >> Version.compare version >> (/=) GT)
+                                                    versions
+                                                    == 1
+                                            then
+                                                Just ( packageName, packageStatus )
+
+                                            else
+                                                currentTodo_
+
+                                FetchedAndChecked _ ->
+                                    currentTodo_
+
+                                FetchingZipFailed _ _ _ ->
+                                    currentTodo_
+
+                                FetchingElmJsonAndDocsFailed _ _ _ ->
+                                    currentTodo_
+                        )
+                        currentTodo
+                        versions
+                )
+                Nothing
+                model.cachedPackages
+    in
+    case maybeNextTodo of
+        Just ( packageName, Pending version _ ) ->
+            getPackageElmJson packageName version
+                |> Task.andThen (\elmJson -> getPackageDocs packageName version |> Task.map (Tuple.pair elmJson))
+                |> Task.attempt (FetchedElmJsonAndDocs { packageName = packageName, version = version })
+
+        Just ( packageName, Fetched { version, elmJson, docs } ) ->
+            getPackageEndpoint packageName version
+                |> Task.andThen (\packageEndpoint -> getPackageZip packageEndpoint)
+                |> Task.attempt (FetchedZipResult { packageName = packageName, version = version } elmJson docs)
+
+        Just ( _, FetchedAndChecked _ ) ->
+            Cmd.none
+
+        Just ( _, FetchingZipFailed _ _ _ ) ->
+            Cmd.none
+
+        Just ( _, FetchingElmJsonAndDocsFailed _ _ _ ) ->
+            Cmd.none
+
+        Nothing ->
+            Cmd.none
 
 
 project : Elm.Project.PackageInfo -> Zip -> Review.Project.Project
@@ -384,6 +500,15 @@ checkPackage elmJson cached zip =
                                     (\package ->
                                         if Elm.Constraint.check (Types.packageVersion package) constraint then
                                             case package of
+                                                Pending _ _ ->
+                                                    Nothing
+
+                                                Fetched data ->
+                                                    Just
+                                                        ( Types.packageVersion package
+                                                        , ( data.elmJson, data.docs )
+                                                        )
+
                                                 FetchedAndChecked data ->
                                                     Just
                                                         ( Types.packageVersion package
@@ -391,6 +516,9 @@ checkPackage elmJson cached zip =
                                                         )
 
                                                 FetchingZipFailed _ _ _ ->
+                                                    Nothing
+
+                                                FetchingElmJsonAndDocsFailed _ _ _ ->
                                                     Nothing
 
                                         else

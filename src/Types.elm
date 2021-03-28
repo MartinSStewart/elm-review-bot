@@ -10,7 +10,6 @@ import Elm.Syntax.Range exposing (Range)
 import Elm.Version exposing (Version)
 import Http
 import Lamdera exposing (ClientId, SessionId)
-import Review.Fix exposing (Fix)
 import Set exposing (Set)
 import Url exposing (Url)
 
@@ -37,73 +36,117 @@ type DisplayOrder
 
 
 type PackageStatus
-    = FetchedAndChecked
+    = Pending Version Int
+    | Fetched
         { version : Version
-        , index : Int
+        , updateIndex : Int
+        , docs : List Elm.Docs.Module
+        , elmJson : Elm.Project.PackageInfo
+        }
+    | FetchedAndChecked
+        { version : Version
+        , updateIndex : Int
         , docs : List Elm.Docs.Module
         , elmJson : Elm.Project.PackageInfo
         , errors : List Error
         }
     | FetchingZipFailed Version Int Http.Error
+    | FetchingElmJsonAndDocsFailed Version Int Http.Error
 
 
 type PackageStatusFrontend
-    = FetchedAndChecked_
+    = Fetched_
         { version : Version
-        , index : Int
+        , updateIndex : Int
+        }
+    | FetchedAndChecked_
+        { version : Version
+        , updateIndex : Int
         , errors : List Error
         }
     | FetchingZipFailed_ Version Int Http.Error
+    | FetchingElmJsonAndDocsFailed_ Version Int Http.Error
 
 
-statusToStatusFrontend : PackageStatus -> PackageStatusFrontend
+statusToStatusFrontend : PackageStatus -> Maybe PackageStatusFrontend
 statusToStatusFrontend packageStatus =
     case packageStatus of
-        FetchedAndChecked { version, index, errors } ->
+        Pending _ _ ->
+            Nothing
+
+        Fetched a ->
+            Fetched_ { version = a.version, updateIndex = a.updateIndex } |> Just
+
+        FetchedAndChecked a ->
             FetchedAndChecked_
-                { version = version
-                , index = index
-                , errors = errors
+                { version = a.version
+                , updateIndex = a.updateIndex
+                , errors = a.errors
                 }
+                |> Just
 
         FetchingZipFailed version index error ->
-            FetchingZipFailed_ version index error
+            FetchingZipFailed_ version index error |> Just
+
+        FetchingElmJsonAndDocsFailed version int error ->
+            FetchingElmJsonAndDocsFailed_ version int error |> Just
 
 
 packageVersion : PackageStatus -> Version
 packageVersion packageStatus =
     case packageStatus of
+        Pending version _ ->
+            version
+
+        Fetched { version } ->
+            version
+
         FetchedAndChecked { version } ->
             version
 
         FetchingZipFailed version _ _ ->
             version
 
+        FetchingElmJsonAndDocsFailed version _ _ ->
+            version
+
 
 packageVersion_ : PackageStatusFrontend -> Version
 packageVersion_ packageStatus =
     case packageStatus of
+        Fetched_ { version } ->
+            version
+
         FetchedAndChecked_ { version } ->
             version
 
         FetchingZipFailed_ version _ _ ->
             version
 
+        FetchingElmJsonAndDocsFailed_ version _ _ ->
+            version
 
-packageIndex : PackageStatusFrontend -> Int
-packageIndex packageStatus =
+
+updateIndex : PackageStatusFrontend -> Int
+updateIndex packageStatus =
     case packageStatus of
-        FetchedAndChecked_ { index } ->
-            index
+        Fetched_ a ->
+            a.updateIndex
 
-        FetchingZipFailed_ _ index _ ->
-            index
+        FetchedAndChecked_ a ->
+            a.updateIndex
+
+        FetchingZipFailed_ _ a _ ->
+            a
+
+        FetchingElmJsonAndDocsFailed_ _ a _ ->
+            a
 
 
 type alias BackendModel =
     { cachedPackages : Dict String (List PackageStatus)
-    , todos : List ( String, Version )
     , clients : Set String
+    , updateIndex : Int
     }
 
 
@@ -120,7 +163,18 @@ type ToBackend
 
 type BackendMsg
     = GotNewPackagePreviews (Result Http.Error (List ( String, Version )))
-    | FetchedZipResult String Version Int (Result Http.Error ( Bytes, List Elm.Docs.Module, Elm.Project.Project ))
+    | FetchedElmJsonAndDocs
+        { packageName : String
+        , version : Version
+        }
+        (Result Http.Error ( Elm.Project.Project, List Elm.Docs.Module ))
+    | FetchedZipResult
+        { packageName : String
+        , version : Version
+        }
+        Elm.Project.PackageInfo
+        (List Elm.Docs.Module)
+        (Result Http.Error Bytes)
     | ClientConnected SessionId ClientId
     | ClientDisconnected SessionId ClientId
 
