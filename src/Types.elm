@@ -38,19 +38,16 @@ type DisplayOrder
 type PackageStatus
     = Pending Version Int
     | Fetched
-        { version : Version
-        , updateIndex : Int
+        { updateIndex : Int
         , docs : List Elm.Docs.Module
         , elmJson : Elm.Project.PackageInfo
         }
     | FetchedAndChecked
-        { version : Version
-        , updateIndex : Int
+        { updateIndex : Int
         , docs : List Elm.Docs.Module
         , elmJson : Elm.Project.PackageInfo
-        , errors : List Error
+        , result : ReviewResult
         }
-    | FetchingZipFailed Version Int Http.Error
     | FetchingElmJsonAndDocsFailed Version Int Http.Error
 
 
@@ -62,9 +59,8 @@ type PackageStatusFrontend
     | FetchedAndChecked_
         { version : Version
         , updateIndex : Int
-        , errors : List Error
+        , result : ReviewResult
         }
-    | FetchingZipFailed_ Version Int Http.Error
     | FetchingElmJsonAndDocsFailed_ Version Int Http.Error
 
 
@@ -75,18 +71,15 @@ statusToStatusFrontend packageStatus =
             Nothing
 
         Fetched a ->
-            Fetched_ { version = a.version, updateIndex = a.updateIndex } |> Just
+            Fetched_ { version = a.elmJson.version, updateIndex = a.updateIndex } |> Just
 
         FetchedAndChecked a ->
             FetchedAndChecked_
-                { version = a.version
+                { version = a.elmJson.version
                 , updateIndex = a.updateIndex
-                , errors = a.errors
+                , result = a.result
                 }
                 |> Just
-
-        FetchingZipFailed version index error ->
-            FetchingZipFailed_ version index error |> Just
 
         FetchingElmJsonAndDocsFailed version int error ->
             FetchingElmJsonAndDocsFailed_ version int error |> Just
@@ -98,14 +91,11 @@ packageVersion packageStatus =
         Pending version _ ->
             version
 
-        Fetched { version } ->
-            version
+        Fetched { elmJson } ->
+            elmJson.version
 
-        FetchedAndChecked { version } ->
-            version
-
-        FetchingZipFailed version _ _ ->
-            version
+        FetchedAndChecked { elmJson } ->
+            elmJson.version
 
         FetchingElmJsonAndDocsFailed version _ _ ->
             version
@@ -120,9 +110,6 @@ packageVersion_ packageStatus =
         FetchedAndChecked_ { version } ->
             version
 
-        FetchingZipFailed_ version _ _ ->
-            version
-
         FetchingElmJsonAndDocsFailed_ version _ _ ->
             version
 
@@ -135,9 +122,6 @@ updateIndex packageStatus =
 
         FetchedAndChecked_ a ->
             a.updateIndex
-
-        FetchingZipFailed_ _ a _ ->
-            a
 
         FetchingElmJsonAndDocsFailed_ _ a _ ->
             a
@@ -154,6 +138,8 @@ type FrontendMsg
     = UrlClicked UrlRequest
     | UrlChanged Url
     | ToggleOrder
+    | PressedCreateFork
+    | CreateForkResult (Result Http.Error Bytes)
     | NoOpFrontendMsg
 
 
@@ -168,15 +154,28 @@ type BackendMsg
         , version : Version
         }
         (Result Http.Error ( Elm.Project.Project, List Elm.Docs.Module ))
-    | FetchedZipResult
+    | RanNoUnused
         { packageName : String
-        , version : Version
+        , elmJson : Elm.Project.PackageInfo
+        , docs : List Elm.Docs.Module
         }
-        Elm.Project.PackageInfo
-        (List Elm.Docs.Module)
-        (Result Http.Error Bytes)
+        ReviewResult
     | ClientConnected SessionId ClientId
     | ClientDisconnected SessionId ClientId
+
+
+type ReviewResult
+    = NotAnElm19xPackage
+    | ParsingError
+    | IncorrectProject
+    | CouldNotOpenBranchZip
+    | CouldNotOpenTagZip
+    | PackageTagNotFound
+    | HttpError Http.Error
+    | InvalidPackageName
+    | NoErrors
+    | RuleErrors (List Error)
+    | RuleErrorsAndPullRequest (List Error) String
 
 
 type ToFrontend

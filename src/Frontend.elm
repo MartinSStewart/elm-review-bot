@@ -9,11 +9,9 @@ import Element.Font
 import Element.Input
 import Elm.Version
 import Html
-import Html.Attributes as Attr
 import Http
 import Lamdera
 import List.Extra as List
-import Review.Rule
 import Types exposing (..)
 import Url
 
@@ -31,7 +29,7 @@ app =
 
 
 init : Url.Url -> Nav.Key -> ( FrontendModel, Cmd FrontendMsg )
-init url key =
+init _ key =
     ( { key = key
       , state = Dict.empty
       , order = RequestOrder
@@ -55,7 +53,7 @@ update msg model =
                     , Nav.load url
                     )
 
-        UrlChanged url ->
+        UrlChanged _ ->
             ( model, Cmd.none )
 
         NoOpFrontendMsg ->
@@ -74,6 +72,18 @@ update msg model =
             , Cmd.none
             )
 
+        PressedCreateFork ->
+            ( model
+            , Cmd.none
+            )
+
+        CreateForkResult result ->
+            let
+                _ =
+                    Debug.log "fork" result
+            in
+            ( model, Cmd.none )
+
 
 updateFromBackend : ToFrontend -> FrontendModel -> ( FrontendModel, Cmd FrontendMsg )
 updateFromBackend msg model =
@@ -91,6 +101,14 @@ updateFromBackend msg model =
               }
             , Cmd.none
             )
+
+
+createPullRequestButton =
+    Element.Input.button
+        buttonAttributes
+        { onPress = Just PressedCreateFork
+        , label = Element.text "Create pull request"
+        }
 
 
 buttonAttributes =
@@ -124,6 +142,7 @@ view model =
                                 , label = Element.text "Show requested order"
                                 }
                     , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
+                    , createPullRequestButton
                     ]
                 , packagesView model
                 ]
@@ -177,23 +196,39 @@ packageView packageName status =
         [ Element.row [ Element.spacing 8 ]
             [ Element.text (packageName ++ " " ++ Elm.Version.toString (Types.packageVersion_ status))
             , case status of
-                FetchedAndChecked_ { errors } ->
-                    case errors of
-                        [] ->
+                FetchedAndChecked_ { result } ->
+                    case result of
+                        Ok ( _, [] ) ->
                             Element.el
                                 [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
                                 (Element.text "Passed")
 
-                        _ ->
-                            Element.el
-                                [ errorColor ]
-                                Element.none
+                        Ok (_ :: _) ->
+                            Element.none
 
-                FetchingZipFailed_ _ _ error ->
-                    httpErrorToString error
-                        |> (++) "Http error: "
-                        |> Element.text
-                        |> Element.el [ errorColor ]
+                        Err NotAnElm19xPackage ->
+                            Element.el [ errorColor ] (Element.text "Not an Elm 19.x package")
+
+                        Err ParsingError ->
+                            Element.el [ errorColor ] (Element.text "Parsing error")
+
+                        Err IncorrectProject ->
+                            Element.el [ errorColor ] (Element.text "Incorrect project")
+
+                        Err CouldNotOpenBranchZip ->
+                            Element.el [ errorColor ] (Element.text "Could not open branch zip")
+
+                        Err CouldNotOpenTagZip ->
+                            Element.el [ errorColor ] (Element.text "Could not open tag zip")
+
+                        Err PackageTagNotFound ->
+                            Element.el [ errorColor ] (Element.text "Package tag not found")
+
+                        Err (HttpError _) ->
+                            Element.el [ errorColor ] (Element.text "Http error")
+
+                        Err InvalidPackageName ->
+                            Element.el [ errorColor ] (Element.text "Invalid package name")
 
                 Fetched_ _ ->
                     Element.text "Fetched"
@@ -205,12 +240,12 @@ packageView packageName status =
                         |> Element.el [ errorColor ]
             ]
         , case status of
-            FetchedAndChecked_ { errors } ->
-                case errors of
-                    [] ->
+            FetchedAndChecked_ { result } ->
+                case result of
+                    Ok [] ->
                         Element.none
 
-                    _ ->
+                    Ok errors ->
                         List.map
                             (\{ ruleName, message } ->
                                 Element.paragraph
@@ -219,6 +254,12 @@ packageView packageName status =
                             )
                             errors
                             |> Element.column [ errorColor ]
+
+                    Err (HttpError httpError) ->
+                        Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
+
+                    _ ->
+                        Element.none
 
             _ ->
                 Element.none

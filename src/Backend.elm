@@ -9,6 +9,8 @@ import Elm.Package
 import Elm.Parser
 import Elm.Project
 import Elm.Version as Version exposing (Version)
+import Env
+import Github
 import Http
 import Json.Decode exposing (Decoder)
 import Json.Encode
@@ -278,8 +280,7 @@ update msg model =
                     case result of
                         Ok ( Elm.Project.Package elmJson, docs ) ->
                             Fetched
-                                { version = version
-                                , updateIndex = model.updateIndex
+                                { updateIndex = model.updateIndex
                                 , docs = docs
                                 , elmJson = elmJson
                                 }
@@ -321,33 +322,22 @@ update msg model =
                 )
             )
 
-        FetchedZipResult { packageName, version } elmJson docs result ->
+        RanNoUnused { packageName, elmJson, docs } result ->
             let
                 packageStatus =
-                    case ( result, elmJson ) of
-                        ( Ok zipBytes, elmJson_ ) ->
-                            case Zip.fromBytes zipBytes of
-                                Just zip ->
-                                    FetchedAndChecked
-                                        { version = version
-                                        , updateIndex = model.updateIndex
-                                        , docs = docs
-                                        , elmJson = elmJson_
-                                        , errors = checkPackage elmJson_ model.cachedPackages zip
-                                        }
-
-                                Nothing ->
-                                    FetchingZipFailed version model.updateIndex (Http.BadBody "Invalid zip")
-
-                        ( Err error, _ ) ->
-                            FetchingZipFailed version model.updateIndex error
+                    FetchedAndChecked
+                        { updateIndex = model.updateIndex
+                        , docs = docs
+                        , elmJson = elmJson
+                        , result = result
+                        }
 
                 model2 =
                     { model
                         | cachedPackages =
                             Dict.update
                                 packageName
-                                (Maybe.map (List.setIf (Types.packageVersion >> (==) version) packageStatus))
+                                (Maybe.map (List.setIf (Types.packageVersion >> (==) elmJson.version) packageStatus))
                                 model.cachedPackages
                         , updateIndex = model.updateIndex + 1
                     }
@@ -394,7 +384,7 @@ nextTodo model =
                                 Pending _ _ ->
                                     Just ( packageName, packageStatus )
 
-                                Fetched { version } ->
+                                Fetched { elmJson } ->
                                     case currentTodo_ of
                                         Just ( _, Pending _ _ ) ->
                                             currentTodo_
@@ -402,7 +392,7 @@ nextTodo model =
                                         _ ->
                                             if
                                                 List.count
-                                                    (Types.packageVersion >> Version.compare version >> (/=) GT)
+                                                    (Types.packageVersion >> Version.compare elmJson.version >> (/=) GT)
                                                     versions
                                                     == 1
                                             then
@@ -412,9 +402,6 @@ nextTodo model =
                                                 currentTodo_
 
                                 FetchedAndChecked _ ->
-                                    currentTodo_
-
-                                FetchingZipFailed _ _ _ ->
                                     currentTodo_
 
                                 FetchingElmJsonAndDocsFailed _ _ _ ->
@@ -432,15 +419,17 @@ nextTodo model =
                 |> Task.andThen (\elmJson -> getPackageDocs packageName version |> Task.map (Tuple.pair elmJson))
                 |> Task.attempt (FetchedElmJsonAndDocs { packageName = packageName, version = version })
 
-        Just ( packageName, Fetched { version, elmJson, docs } ) ->
-            getPackageEndpoint packageName version
-                |> Task.andThen (\packageEndpoint -> getPackageZip packageEndpoint)
-                |> Task.attempt (FetchedZipResult { packageName = packageName, version = version } elmJson docs)
+        Just ( packageName, Fetched { elmJson, docs } ) ->
+            (case String.split "/" packageName of
+                [ owner, repo ] ->
+                    reportErrors owner repo elmJson model
+
+                _ ->
+                    Task.fail InvalidPackageName
+            )
+                |> Task.perform (RanNoUnused { packageName = packageName, elmJson = elmJson, docs = docs })
 
         Just ( _, FetchedAndChecked _ ) ->
-            Cmd.none
-
-        Just ( _, FetchingZipFailed _ _ _ ) ->
             Cmd.none
 
         Just ( _, FetchingElmJsonAndDocsFailed _ _ _ ) ->
@@ -448,6 +437,108 @@ nextTodo model =
 
         Nothing ->
             Cmd.none
+
+
+createPullRequest : String -> String -> String -> Task Http.Error ()
+createPullRequest originalOwner originalRepo branchName =
+    Github.createFork
+        { authToken = Env.githubAuth, owner = originalOwner, repo = originalRepo }
+        |> Task.andThen
+            (\fork ->
+                Github.getBranch
+                    { authToken = Env.githubAuth
+                    , repo = fork.repo
+                    , owner = fork.owner
+                    , branchName = branchName
+                    }
+                    |> Task.andThen
+                        (\branch ->
+                            Github.createCommit
+                                { authToken = Env.githubAuth
+                                , repo = fork.repo
+                                , owner = fork.owner
+                                , message = "Remove unused dependencies"
+                                , tree = ""
+                                , parents = [ branch.object.sha ]
+                                }
+                        )
+                    |> Task.andThen
+                        (\reference ->
+                            Github.updateBranch
+                                { authToken = Env.githubAuth
+                                , owner = fork.owner
+                                , repo = fork.repo
+                                , branchName = branchName
+                                , sha = reference.sha
+                                , force = False
+                                }
+                        )
+                    |> Task.andThen
+                        (\reference ->
+                            Github.createPullRequest
+                                { authToken = Env.githubAuth
+                                , owner = originalOwner
+                                , baseBranchOwner = fork.owner
+                                , repo = fork.repo
+                                , branchName = branchName
+                                , baseBranch = branchName
+                                , title = "Remove unused dependencies"
+                                , description = "I found some unused dependencies in your package."
+                                }
+                        )
+            )
+
+
+reportErrors : String -> String -> Elm.Project.PackageInfo -> BackendModel -> Task Never ReviewResult
+reportErrors repo owner elmJson model =
+    Github.getRepository { authToken = Env.githubAuth, repo = repo, owner = owner }
+        |> Task.andThen
+            (\{ defaultBranch } ->
+                Github.getBranchZip { authToken = Env.githubAuth, branchName = defaultBranch, repo = repo, owner = owner }
+                    |> Task.andThen
+                        (\bytes ->
+                            case Zip.fromBytes bytes of
+                                Just zip ->
+                                    case checkPackage elmJson model.cachedPackages zip of
+                                        Ok ruleErrors ->
+                                            createPullRequest ruleErrors
+
+                                        Err _ ->
+                                            Github.getTag
+                                                { authToken = Env.githubAuth
+                                                , repo = repo
+                                                , owner = owner
+                                                , tagName = Version.toString elmJson.version
+                                                }
+                                                |> Task.andThen
+                                                    (\tag ->
+                                                        Github.getCommitZip
+                                                            { authToken = Env.githubAuth
+                                                            , repo = repo
+                                                            , owner = owner
+                                                            , sha = tag.object.sha
+                                                            }
+                                                    )
+                                                |> Task.andThen
+                                                    (\bytes2 ->
+                                                        case Zip.fromBytes bytes2 of
+                                                            Just zip2 ->
+                                                                case checkPackage elmJson model.cachedPackages zip2 of
+                                                                    Ok ruleErrors ->
+                                                                        Task.succeed (RuleErrors ruleErrors)
+
+                                                                    Err error ->
+                                                                        Task.succeed error
+
+                                                            Nothing ->
+                                                                Task.succeed CouldNotOpenTagZip
+                                                    )
+
+                                Nothing ->
+                                    Task.succeed CouldNotOpenBranchZip
+                        )
+            )
+        |> Task.onError (HttpError >> Task.succeed)
 
 
 project :
@@ -544,7 +635,7 @@ project elmJson srcModules testModules =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> List Error
+checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result ReviewError (List Error)
 checkPackage elmJson cached zip =
     let
         modules : String -> List { path : String, source : String }
@@ -604,9 +695,6 @@ checkPackage elmJson cached zip =
                                                         , ( data.elmJson, data.docs )
                                                         )
 
-                                                FetchingZipFailed _ _ _ ->
-                                                    Nothing
-
                                                 FetchingElmJsonAndDocsFailed _ _ _ ->
                                                     Nothing
 
@@ -642,12 +730,23 @@ checkPackage elmJson cached zip =
                             , range = Review.Rule.errorRange error
                             }
                         )
+                    |> (\errors ->
+                            if List.any (\error -> error.ruleName == "ParsingError") errors then
+                                Err ParsingError
+
+                            else if List.any (\error -> error.ruleName == "Incorrect project") errors then
+                                Err IncorrectProject
+
+                            else
+                                Ok errors
+                       )
 
             else
-                []
+                Err NotAnElm19xPackage
 
         Nothing ->
-            []
+            -- Should never happen
+            Err NotAnElm19xPackage
 
 
 addDependency : Elm.Project.PackageInfo -> List Elm.Docs.Module -> Review.Project.Project -> Review.Project.Project
