@@ -4,7 +4,9 @@ import Bytes exposing (Bytes)
 import Dict exposing (Dict)
 import Elm.Constraint exposing (Constraint)
 import Elm.Docs
+import Elm.Module
 import Elm.Package
+import Elm.Parser
 import Elm.Project
 import Elm.Version as Version exposing (Version)
 import Http
@@ -14,10 +16,11 @@ import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
+import Parser exposing (Parser)
 import Review.Project
 import Review.Project.Dependency
 import Review.Rule
-import Set
+import Set exposing (Set)
 import Task exposing (Task)
 import Types exposing (..)
 import Zip exposing (Zip)
@@ -447,38 +450,93 @@ nextTodo model =
             Cmd.none
 
 
-project : Elm.Project.PackageInfo -> Zip -> Review.Project.Project
-project elmJson zip =
-    List.foldl
-        (\zipEntry project_ ->
-            if Zip.Entry.isDirectory zipEntry then
-                project_
+project :
+    Elm.Project.PackageInfo
+    -> List { path : String, source : String }
+    -> List { path : String, source : String }
+    -> Review.Project.Project
+project elmJson srcModules testModules =
+    let
+        importParser : Parser String
+        importParser =
+            Parser.chompWhile (\c -> c /= ' ' && c /= '\t' && c /= '\n') |> Parser.getChompedString
 
-            else
-                case
-                    ( String.split "/" (Zip.Entry.path zipEntry) |> List.Nonempty.fromList
-                    , Zip.Entry.toString zipEntry
+        srcModules_ : Dict String { path : String, source : String, imports : List String }
+        srcModules_ =
+            srcModules
+                |> List.map
+                    (\{ path, source } ->
+                        let
+                            moduleName =
+                                String.dropLeft (String.length "src/") path
+                                    |> String.dropRight (String.length ".elm")
+                                    |> String.replace "/" "."
+                        in
+                        ( moduleName
+                        , { path = path
+                          , source = source
+                          , imports =
+                                String.filter ((/=) '\u{000D}') source
+                                    |> String.indexes "\nimport"
+                                    |> List.filterMap
+                                        (\index ->
+                                            String.slice (index + 7) 200 source
+                                                |> String.trim
+                                                |> Parser.run importParser
+                                                |> Result.toMaybe
+                                        )
+                          }
+                        )
                     )
-                of
-                    ( Just nonemptyPath, Ok source ) ->
-                        if
-                            String.endsWith ".elm" (List.Nonempty.last nonemptyPath)
-                                && (List.Nonempty.get 1 nonemptyPath == "src" || List.Nonempty.get 1 nonemptyPath == "tests")
-                        then
-                            Review.Project.addModule
-                                { path = Zip.Entry.path zipEntry
-                                , source = source
-                                }
-                                project_
+                |> Dict.fromList
 
-                        else
-                            project_
+        directlyExposedModules =
+            (case elmJson.exposed of
+                Elm.Project.ExposedList exposed ->
+                    exposed
 
-                    _ ->
-                        project_
-        )
-        Review.Project.new
-        (Zip.ls zip)
+                Elm.Project.ExposedDict exposed ->
+                    List.concatMap Tuple.second exposed
+            )
+                |> List.filterMap
+                    (\import_ ->
+                        Dict.get (Elm.Module.toString import_) srcModules_
+                            |> Maybe.map (Tuple.pair (Elm.Module.toString import_))
+                    )
+                |> Dict.fromList
+
+        usedSrcModules unchecked collected =
+            case Dict.toList unchecked of
+                ( moduleName, head ) :: rest ->
+                    let
+                        collected_ =
+                            Dict.insert moduleName head collected
+                    in
+                    usedSrcModules
+                        (List.filterMap
+                            (\import_ ->
+                                case ( Dict.get import_ srcModules_, Dict.member import_ collected_ ) of
+                                    ( Just module_, False ) ->
+                                        Just ( import_, module_ )
+
+                                    _ ->
+                                        Nothing
+                            )
+                            head.imports
+                            ++ rest
+                            |> Dict.fromList
+                        )
+                        collected_
+
+                [] ->
+                    collected
+    in
+    usedSrcModules directlyExposedModules Dict.empty
+        |> Dict.toList
+        |> List.map (\( _, module_ ) -> { path = module_.path, source = module_.source })
+        |> (++) testModules
+        |> List.foldl Review.Project.addModule Review.Project.new
+        |> Debug.log ""
         |> Review.Project.addElmJson
             { path = "src/elm.json"
             , raw = Elm.Project.Package elmJson |> Elm.Project.encode |> Json.Encode.encode 0
@@ -489,6 +547,37 @@ project elmJson zip =
 checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> List Error
 checkPackage elmJson cached zip =
     let
+        modules : String -> List { path : String, source : String }
+        modules folderName =
+            List.filterMap
+                (\zipEntry ->
+                    if Zip.Entry.isDirectory zipEntry then
+                        Nothing
+
+                    else
+                        case
+                            ( String.split "/" (Zip.Entry.path zipEntry) |> List.Nonempty.fromList
+                            , Zip.Entry.toString zipEntry
+                            )
+                        of
+                            ( Just nonemptyPath, Ok source ) ->
+                                if
+                                    String.endsWith ".elm" (List.Nonempty.last nonemptyPath)
+                                        && (List.Nonempty.get 1 nonemptyPath == folderName)
+                                then
+                                    Just
+                                        { path = Zip.Entry.path zipEntry
+                                        , source = source
+                                        }
+
+                                else
+                                    Nothing
+
+                            _ ->
+                                Nothing
+                )
+                (Zip.ls zip)
+
         projectWithDependencies : Review.Project.Project
         projectWithDependencies =
             List.foldl
@@ -536,7 +625,7 @@ checkPackage elmJson cached zip =
                         Nothing ->
                             state
                 )
-                (project elmJson zip)
+                (project elmJson (modules "src") (modules "tests"))
                 elmJson.deps
     in
     case Version.fromTuple ( 0, 19, 1 ) of
