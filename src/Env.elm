@@ -11,7 +11,7 @@ dummyConfigItem =
 
 
 githubAuth_ =
-    ""
+    "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"
 
 
 githubAuth =

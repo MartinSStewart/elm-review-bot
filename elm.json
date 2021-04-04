@@ -18,8 +18,6 @@
             "elm/time": "1.0.0",
             "elm/url": "1.0.0",
             "elm-community/list-extra": "8.2.4",
-            "jfmengels/elm-review": "2.3.11",
-            "jfmengels/elm-review-unused": "1.1.4",
             "lamdera/codecs": "1.0.0",
             "lamdera/core": "1.0.0",
             "mdgriffith/elm-ui": "1.1.8",
