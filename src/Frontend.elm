@@ -1,5 +1,6 @@
 module Frontend exposing (..)
 
+import Backend
 import Browser exposing (UrlRequest(..))
 import Browser.Navigation as Nav
 import Dict
@@ -12,6 +13,7 @@ import Html
 import Http
 import Lamdera
 import List.Extra as List
+import Task
 import Types exposing (..)
 import Url
 
@@ -74,7 +76,8 @@ update msg model =
 
         PressedCreateFork ->
             ( model
-            , Cmd.none
+            , Backend.createPullRequest "test" "MartinSStewart" "elm-serialize" "master"
+                |> Task.attempt CreateForkResult
             )
 
         CreateForkResult result ->
@@ -198,36 +201,41 @@ packageView packageName status =
             , case status of
                 FetchedAndChecked_ { result } ->
                     case result of
-                        Ok ( _, [] ) ->
+                        NoErrors ->
                             Element.el
                                 [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
                                 (Element.text "Passed")
 
-                        Ok (_ :: _) ->
-                            Element.none
+                        RuleErrors _ ->
+                            Element.el [ errorColor ] (Element.text "Found errors")
 
-                        Err NotAnElm19xPackage ->
+                        RuleErrorsAndPullRequest _ url ->
+                            Element.newTabLink
+                                [ Element.Font.color <| Element.rgb 0.1 0.1 0.8 ]
+                                { url = url, label = Element.text "Found errors and created PR" }
+
+                        NotAnElm19xPackage ->
                             Element.el [ errorColor ] (Element.text "Not an Elm 19.x package")
 
-                        Err ParsingError ->
+                        ParsingError ->
                             Element.el [ errorColor ] (Element.text "Parsing error")
 
-                        Err IncorrectProject ->
+                        IncorrectProject ->
                             Element.el [ errorColor ] (Element.text "Incorrect project")
 
-                        Err CouldNotOpenBranchZip ->
+                        CouldNotOpenBranchZip ->
                             Element.el [ errorColor ] (Element.text "Could not open branch zip")
 
-                        Err CouldNotOpenTagZip ->
+                        CouldNotOpenTagZip ->
                             Element.el [ errorColor ] (Element.text "Could not open tag zip")
 
-                        Err PackageTagNotFound ->
+                        PackageTagNotFound ->
                             Element.el [ errorColor ] (Element.text "Package tag not found")
 
-                        Err (HttpError _) ->
+                        HttpError _ ->
                             Element.el [ errorColor ] (Element.text "Http error")
 
-                        Err InvalidPackageName ->
+                        InvalidPackageName ->
                             Element.el [ errorColor ] (Element.text "Invalid package name")
 
                 Fetched_ _ ->
@@ -242,10 +250,7 @@ packageView packageName status =
         , case status of
             FetchedAndChecked_ { result } ->
                 case result of
-                    Ok [] ->
-                        Element.none
-
-                    Ok errors ->
+                    RuleErrors errors ->
                         List.map
                             (\{ ruleName, message } ->
                                 Element.paragraph
@@ -255,7 +260,17 @@ packageView packageName status =
                             errors
                             |> Element.column [ errorColor ]
 
-                    Err (HttpError httpError) ->
+                    RuleErrorsAndPullRequest errors _ ->
+                        List.map
+                            (\{ ruleName, message } ->
+                                Element.paragraph
+                                    []
+                                    [ Element.text <| ruleName ++ ": " ++ message ]
+                            )
+                            errors
+                            |> Element.column [ errorColor ]
+
+                    HttpError httpError ->
                         Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
 
                     _ ->

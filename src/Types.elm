@@ -139,7 +139,7 @@ type FrontendMsg
     | UrlChanged Url
     | ToggleOrder
     | PressedCreateFork
-    | CreateForkResult (Result Http.Error Bytes)
+    | CreateForkResult (Result Http.Error { url : String })
     | NoOpFrontendMsg
 
 

@@ -6,7 +6,7 @@ module Github exposing
     , getFileContents, updateFileContents
     , createFork
     , getComments, createComment
-    , getBranchZip, getCommitZip, getRepository, getTag, updateBranch
+    , ShaHash, createBlob, createTree, getBranchZip, getCommitZip, getRepository, getTag, getTree, sha, shaToString, updateBranch
     )
 
 {-|
@@ -75,53 +75,70 @@ getBranchZip params =
         }
 
 
-getCommitZip : { authToken : AuthToken, owner : String, repo : String, sha : String } -> Task Http.Error Bytes
+getCommitZip : { authToken : AuthToken, owner : String, repo : String, sha : ShaHash } -> Task Http.Error Bytes
 getCommitZip params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://github.com/" ++ params.owner ++ "/" ++ params.repo ++ "/archive/" ++ params.sha ++ ".zip"
+        , url = "https://github.com/" ++ params.owner ++ "/" ++ params.repo ++ "/archive/" ++ shaToString params.sha ++ ".zip"
         , body = Http.emptyBody
         , resolver = bytesResolver
         , timeout = Nothing
         }
 
 
-{-| See <https://developer.github.com/v3/git/commits/#get-a-commit>
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-commit>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
 -}
 getCommit :
     { authToken : AuthToken
+    , owner : String
     , repo : String
-    , sha : String
+    , sha : ShaHash
     }
-    ->
-        Task
-            Http.Error
-            { sha : String
-            , tree :
-                { sha : String
-                }
-            }
+    -> Task Http.Error { treeSha : ShaHash }
 getCommit params =
     let
         decoder =
-            Json.Decode.map2
-                (\sha treeSha ->
-                    { sha = sha
-                    , tree = { sha = treeSha }
-                    }
-                )
-                (Json.Decode.at [ "sha" ] Json.Decode.string)
-                (Json.Decode.at [ "tree", "sha" ] Json.Decode.string)
+            Json.Decode.map
+                (\treeSha -> { treeSha = treeSha })
+                (Json.Decode.at [ "tree", "sha" ] decodeSha)
     in
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/commits/" ++ params.sha
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/commits/" ++ shaToString params.sha
         , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-blob>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+createBlob :
+    { authToken : AuthToken
+    , owner : String
+    , repo : String
+    , content : String
+    }
+    -> Task Http.Error ShaHash
+createBlob params =
+    let
+        decoder =
+            Json.Decode.field "sha" Json.Decode.string
+                |> Json.Decode.map sha
+    in
+    Http.task
+        { method = "POST"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs"
+        , body = Http.jsonBody (Json.Encode.object [ ( "content", Json.Encode.string params.content ) ])
         , resolver = jsonResolver decoder
         , timeout = Nothing
         }
@@ -137,19 +154,15 @@ createCommit :
     , owner : String
     , repo : String
     , message : String
-    , tree : String
-    , parents : List String
+    , tree : ShaHash
+    , parents : List ShaHash
     }
-    ->
-        Task
-            Http.Error
-            { sha : String
-            }
+    -> Task Http.Error ShaHash
 createCommit params =
     let
         decoder =
-            Json.Decode.at [ "sha" ] Json.Decode.string
-                |> Json.Decode.map (\sha -> { sha = sha })
+            Json.Decode.field "sha" Json.Decode.string
+                |> Json.Decode.map sha
     in
     Http.task
         { method = "POST"
@@ -159,8 +172,8 @@ createCommit params =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "message", Json.Encode.string params.message )
-                    , ( "tree", Json.Encode.string params.tree )
-                    , ( "parents", Json.Encode.list Json.Encode.string params.parents )
+                    , ( "tree", encodeSha params.tree )
+                    , ( "parents", Json.Encode.list encodeSha params.parents )
                     ]
                 )
         , resolver = jsonResolver decoder
@@ -179,20 +192,19 @@ getBranch :
     , repo : String
     , branchName : String
     }
-    ->
-        Task
-            Http.Error
-            { object :
-                { sha : String
-                }
-            }
+    -> Task Http.Error { commitSha : ShaHash }
 getBranch params =
+    let
+        decoder =
+            Json.Decode.map (\commitSha -> { commitSha = commitSha })
+                (Json.Decode.at [ "object", "sha" ] decodeSha)
+    in
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ params.branchName
         , body = Http.emptyBody
-        , resolver = jsonResolver referenceDecoder
+        , resolver = jsonResolver decoder
         , timeout = Nothing
         }
 
@@ -207,16 +219,10 @@ updateBranch :
     , owner : String
     , repo : String
     , branchName : String
-    , sha : String
+    , sha : ShaHash
     , force : Bool
     }
-    ->
-        Task
-            Http.Error
-            { object :
-                { sha : String
-                }
-            }
+    -> Task Http.Error ShaHash
 updateBranch params =
     Http.task
         { method = "PATCH"
@@ -225,7 +231,7 @@ updateBranch params =
         , body =
             Http.jsonBody
                 (Json.Encode.object
-                    [ ( "sha", Json.Encode.string params.sha ), ( "force", Json.Encode.bool params.force ) ]
+                    [ ( "sha", Json.Encode.string (shaToString params.sha) ), ( "force", Json.Encode.bool params.force ) ]
                 )
         , resolver = jsonResolver referenceDecoder
         , timeout = Nothing
@@ -243,50 +249,158 @@ getTag :
     , repo : String
     , tagName : String
     }
-    ->
-        Task
-            Http.Error
-            { object :
-                { sha : String
-                }
-            }
+    -> Task Http.Error { commitSha : ShaHash }
 getTag params =
+    let
+        decoder =
+            Json.Decode.map (\commitSha -> { commitSha = commitSha })
+                (Json.Decode.at [ "object", "sha" ] decodeSha)
+    in
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/tags/" ++ params.tagName
         , body = Http.emptyBody
-        , resolver = jsonResolver referenceDecoder
+        , resolver = jsonResolver decoder
         , timeout = Nothing
         }
 
 
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-tree>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+getTree :
+    { authToken : AuthToken
+    , owner : String
+    , repo : String
+    , treeSha : ShaHash
+    }
+    -> Task Http.Error (List TreeNode)
+getTree params =
+    let
+        decoder =
+            Json.Decode.field "tree" (Json.Decode.list decodeTreeNode)
+    in
+    Http.task
+        { method = "GET"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/trees/" ++ shaToString params.treeSha
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-tree>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+createTree :
+    { authToken : AuthToken
+    , owner : String
+    , repo : String
+    , treeNodes : List { path : String, content : String }
+    , baseTree : Maybe ShaHash
+    }
+    -> Task Http.Error { treeSha : ShaHash }
+createTree params =
+    let
+        decoder =
+            Json.Decode.field "sha" decodeSha
+                |> Json.Decode.map (\treeSha -> { treeSha = treeSha })
+    in
+    Http.task
+        { method = "POST"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/trees"
+        , body =
+            ( "tree", Json.Encode.list encodeTreeNode params.treeNodes )
+                :: (case params.baseTree of
+                        Just baseTree ->
+                            [ ( "base_tree", encodeSha baseTree ) ]
+
+                        Nothing ->
+                            []
+                   )
+                |> Json.Encode.object
+                |> Http.jsonBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+type TreeNode
+    = Subdirectory { path : String, sha : ShaHash }
+    | Blob { path : String, sha : ShaHash, size : Int }
+    | ExecutableBlob { path : String, sha : ShaHash, size : Int }
+    | Submodule
+    | Symlink
+
+
+encodeTreeNode : { path : String, content : String } -> Json.Encode.Value
+encodeTreeNode treeNode =
+    ( "path", Json.Encode.string treeNode.path )
+        :: ( "mode", Json.Encode.string "100644" )
+        :: ( "type", Json.Encode.string "blob" )
+        :: ( "content", Json.Encode.string treeNode.content )
+        :: []
+        |> Json.Encode.object
+
+
+decodeTreeNode : Json.Decode.Decoder TreeNode
+decodeTreeNode =
+    Json.Decode.field "mode" Json.Decode.string
+        |> Json.Decode.andThen
+            (\mode ->
+                case String.toInt mode of
+                    Just 100644 ->
+                        Json.Decode.map3 (\path sha_ size -> Blob { path = path, sha = sha_, size = size })
+                            (Json.Decode.field "path" Json.Decode.string)
+                            (Json.Decode.field "sha" decodeSha)
+                            (Json.Decode.field "size" Json.Decode.int)
+
+                    Just 100755 ->
+                        Json.Decode.map3 (\path sha_ size -> ExecutableBlob { path = path, sha = sha_, size = size })
+                            (Json.Decode.field "path" Json.Decode.string)
+                            (Json.Decode.field "sha" decodeSha)
+                            (Json.Decode.field "size" Json.Decode.int)
+
+                    Just 40000 ->
+                        Json.Decode.map2 (\path sha_ -> Subdirectory { path = path, sha = sha_ })
+                            (Json.Decode.field "path" Json.Decode.string)
+                            (Json.Decode.field "sha" decodeSha)
+
+                    Just 160000 ->
+                        Json.Decode.succeed Submodule
+
+                    Just 120000 ->
+                        Json.Decode.succeed Symlink
+
+                    _ ->
+                        Json.Decode.fail ("Invalid mode: " ++ mode)
+            )
+
+
 referenceDecoder =
     Json.Decode.at [ "object", "sha" ] Json.Decode.string
-        |> Json.Decode.map (\sha -> { object = { sha = sha } })
+        |> Json.Decode.map sha
 
 
 type alias Tag =
     { name : String
-    , commit : { sha : String, url : String }
-    , zipballUrl : String
-    , tarballUrl : String
+    , commitSha : ShaHash
     , nodeId : String
     }
 
 
 decodeTag : Json.Decode.Decoder Tag
 decodeTag =
-    Json.Decode.map5 Tag
+    Json.Decode.map3 Tag
         (Json.Decode.field "name" Json.Decode.string)
-        (Json.Decode.field "commit"
-            (Json.Decode.map2 (\sha url -> { sha = sha, url = url })
-                (Json.Decode.field "sha" Json.Decode.string)
-                (Json.Decode.field "url" Json.Decode.string)
-            )
-        )
-        (Json.Decode.field "zipball_url" Json.Decode.string)
-        (Json.Decode.field "tarball_url" Json.Decode.string)
+        (Json.Decode.at [ "commit", "sha" ] decodeSha)
         (Json.Decode.field "node_id" Json.Decode.string)
 
 
@@ -321,7 +435,7 @@ createBranch :
     { authToken : AuthToken
     , repo : String
     , branchName : String
-    , sha : String
+    , sha : ShaHash
     }
     -> Task Http.Error ()
 createBranch params =
@@ -337,7 +451,7 @@ createBranch params =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "ref", Json.Encode.string ("refs/heads/" ++ params.branchName) )
-                    , ( "sha", Json.Encode.string params.sha )
+                    , ( "sha", Json.Encode.string (shaToString params.sha) )
                     ]
                 )
         , resolver = jsonResolver decoder
@@ -396,7 +510,7 @@ getPullRequest :
             Http.Error
             { head :
                 { ref : String
-                , sha : String
+                , sha : ShaHash
                 }
             }
 getPullRequest params =
@@ -406,7 +520,7 @@ getPullRequest params =
                 (\headRef headSha ->
                     { head =
                         { ref = headRef
-                        , sha = headSha
+                        , sha = sha headSha
                         }
                     }
                 )
@@ -430,36 +544,37 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 createPullRequest :
     { authToken : AuthToken
-    , owner : String
-    , repo : String
-    , baseBranchOwner : String
-    , branchName : String
-    , baseBranch : String
+    , destinationOwner : String
+    , destinationRepo : String
+    , destinationBranch : String
+    , sourceBranchOwner : String
+    , sourceBranch : String
     , title : String
     , description : String
     }
-    -> Task Http.Error ()
+    -> Task Http.Error { url : String }
 createPullRequest params =
     let
         decoder =
-            Json.Decode.succeed ()
+            Json.Decode.field "url" Json.Decode.string
+                |> Json.Decode.map (\url -> { url = url })
     in
     Http.task
         { method = "POST"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/pulls"
+        , url = "https://api.github.com/repos/" ++ params.destinationOwner ++ "/" ++ params.destinationRepo ++ "/pulls"
         , body =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "title", Json.Encode.string params.title )
-                    , ( "head", Json.Encode.string params.branchName )
-                    , ( "base"
+                    , ( "base", Json.Encode.string params.destinationBranch )
+                    , ( "head"
                       , Json.Encode.string
-                            (if params.owner == params.baseBranchOwner then
-                                params.baseBranch
+                            (if params.sourceBranch == params.sourceBranchOwner then
+                                params.sourceBranch
 
                              else
-                                params.baseBranchOwner ++ ":" ++ params.baseBranch
+                                params.sourceBranchOwner ++ ":" ++ params.sourceBranch
                             )
                       )
                     , ( "body", Json.Encode.string params.description )
@@ -486,16 +601,16 @@ getFileContents :
             Http.Error
             { encoding : String
             , content : String
-            , sha : String
+            , sha : ShaHash
             }
 getFileContents params =
     let
         decoder =
             Json.Decode.map3
-                (\encoding content sha ->
+                (\encoding content sha_ ->
                     { encoding = encoding
                     , content = content
-                    , sha = sha
+                    , sha = sha sha_
                     }
                 )
                 (Json.Decode.at [ "encoding" ] Json.Decode.string)
@@ -522,7 +637,7 @@ updateFileContents :
     , repo : String
     , branch : String
     , path : String
-    , sha : String
+    , sha : ShaHash
     , message : String
     , content : String
     }
@@ -530,7 +645,7 @@ updateFileContents :
         Task
             Http.Error
             { content :
-                { sha : String
+                { sha : ShaHash
                 }
             }
 updateFileContents params =
@@ -540,7 +655,7 @@ updateFileContents params =
                 (\contentSha ->
                     { content = { sha = contentSha } }
                 )
-                (Json.Decode.at [ "content", "sha" ] Json.Decode.string)
+                (Json.Decode.at [ "content", "sha" ] decodeSha)
     in
     Http.task
         { method = "PUT"
@@ -551,7 +666,7 @@ updateFileContents params =
                 (Json.Encode.object
                     [ ( "message", Json.Encode.string params.message )
                     , ( "content", Json.Encode.string (Base64.encode params.content) )
-                    , ( "sha", Json.Encode.string params.sha )
+                    , ( "sha", encodeSha params.sha )
                     , ( "branch", Json.Encode.string params.branch )
                     ]
                 )
@@ -677,6 +792,30 @@ type AuthToken
 authToken : String -> AuthToken
 authToken =
     AuthToken
+
+
+type ShaHash
+    = ShaHash String
+
+
+sha : String -> ShaHash
+sha =
+    ShaHash
+
+
+shaToString : ShaHash -> String
+shaToString (ShaHash shaHash) =
+    shaHash
+
+
+decodeSha : Json.Decode.Decoder ShaHash
+decodeSha =
+    Json.Decode.string |> Json.Decode.map sha
+
+
+encodeSha : ShaHash -> Json.Encode.Value
+encodeSha =
+    shaToString >> Json.Encode.string
 
 
 {-| See <https://docs.github.com/en/rest/reference/repos#create-a-fork>

@@ -425,7 +425,7 @@ nextTodo model =
                     reportErrors owner repo elmJson model
 
                 _ ->
-                    Task.fail InvalidPackageName
+                    Task.succeed InvalidPackageName
             )
                 |> Task.perform (RanNoUnused { packageName = packageName, elmJson = elmJson, docs = docs })
 
@@ -439,8 +439,8 @@ nextTodo model =
             Cmd.none
 
 
-createPullRequest : String -> String -> String -> Task Http.Error ()
-createPullRequest originalOwner originalRepo branchName =
+createPullRequest : String -> String -> String -> String -> Task Http.Error { url : String }
+createPullRequest elmJsonContent originalOwner originalRepo branchName =
     Github.createFork
         { authToken = Env.githubAuth, owner = originalOwner, repo = originalRepo }
         |> Task.andThen
@@ -453,35 +453,58 @@ createPullRequest originalOwner originalRepo branchName =
                     }
                     |> Task.andThen
                         (\branch ->
-                            Github.createCommit
+                            Github.getCommit
                                 { authToken = Env.githubAuth
                                 , repo = fork.repo
                                 , owner = fork.owner
-                                , message = "Remove unused dependencies"
-                                , tree = ""
-                                , parents = [ branch.object.sha ]
+                                , sha = branch.commitSha
                                 }
+                                |> Task.andThen
+                                    (\{ treeSha } ->
+                                        Github.createTree
+                                            { authToken = Env.githubAuth
+                                            , owner = fork.owner
+                                            , repo = fork.repo
+                                            , treeNodes =
+                                                [ { path = "elm.json"
+                                                  , content = elmJsonContent
+                                                  }
+                                                ]
+                                            , baseTree = Just branch.commitSha
+                                            }
+                                            |> Task.andThen
+                                                (\tree ->
+                                                    Github.createCommit
+                                                        { authToken = Env.githubAuth
+                                                        , repo = fork.repo
+                                                        , owner = fork.owner
+                                                        , message = "Remove unused dependencies"
+                                                        , tree = tree.treeSha
+                                                        , parents = [ branch.commitSha ]
+                                                        }
+                                                )
+                                    )
                         )
                     |> Task.andThen
-                        (\reference ->
+                        (\commitSha ->
                             Github.updateBranch
                                 { authToken = Env.githubAuth
                                 , owner = fork.owner
                                 , repo = fork.repo
                                 , branchName = branchName
-                                , sha = reference.sha
+                                , sha = commitSha
                                 , force = False
                                 }
                         )
                     |> Task.andThen
-                        (\reference ->
+                        (\_ ->
                             Github.createPullRequest
                                 { authToken = Env.githubAuth
-                                , owner = originalOwner
-                                , baseBranchOwner = fork.owner
-                                , repo = fork.repo
-                                , branchName = branchName
-                                , baseBranch = branchName
+                                , sourceBranchOwner = fork.owner
+                                , destinationOwner = originalOwner
+                                , destinationRepo = fork.repo
+                                , destinationBranch = branchName
+                                , sourceBranch = branchName
                                 , title = "Remove unused dependencies"
                                 , description = "I found some unused dependencies in your package."
                                 }
@@ -501,7 +524,8 @@ reportErrors repo owner elmJson model =
                                 Just zip ->
                                     case checkPackage elmJson model.cachedPackages zip of
                                         Ok ruleErrors ->
-                                            createPullRequest ruleErrors
+                                            createPullRequest "test" owner repo defaultBranch
+                                                |> Task.map (.url >> RuleErrorsAndPullRequest ruleErrors)
 
                                         Err _ ->
                                             Github.getTag
@@ -516,7 +540,7 @@ reportErrors repo owner elmJson model =
                                                             { authToken = Env.githubAuth
                                                             , repo = repo
                                                             , owner = owner
-                                                            , sha = tag.object.sha
+                                                            , sha = tag.commitSha
                                                             }
                                                     )
                                                 |> Task.andThen
@@ -635,7 +659,7 @@ project elmJson srcModules testModules =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result ReviewError (List Error)
+checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result ReviewResult (List Error)
 checkPackage elmJson cached zip =
     let
         modules : String -> List { path : String, source : String }
