@@ -76,8 +76,9 @@ update msg model =
 
         PressedCreateFork ->
             ( model
-            , Backend.createPullRequest 1 "test" "MartinSStewart" "elm-serialize" "master"
-                |> Task.attempt CreateForkResult
+            , Cmd.none
+              --, Backend.createPullRequest 1 "test" "MartinSStewart" "elm-serialize" "master"
+              --    |> Task.attempt CreateForkResult
             )
 
         CreateForkResult result ->
@@ -206,25 +207,14 @@ packageView packageName status =
                                 [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
                                 (Element.text "Passed")
 
-                        RuleErrors _ ->
+                        RuleErrorsFromDefaultBranch _ ->
                             Element.el [ errorColor ] (Element.text "Found errors but the default branch doesn't match package tag ")
 
                         RuleErrorsFromTag _ ->
                             Element.el [ errorColor ] (Element.text "Found errors in package tag but failed to handle default branch")
 
-                        RuleErrorsAndPullRequest _ url ->
-                            Element.newTabLink
-                                [ Element.Font.color <| Element.rgb 0.1 0.1 0.9 ]
-                                { url = url, label = Element.text "Found errors and created PR" }
-
-                        NotAnElm19xPackage ->
-                            Element.el [ errorColor ] (Element.text "Not an Elm 19.x package")
-
-                        ParsingError ->
-                            Element.el [ errorColor ] (Element.text "Parsing error")
-
-                        IncorrectProject ->
-                            Element.el [ errorColor ] (Element.text "Incorrect project")
+                        RuleErrorsAndDefaultBranchAndTagMatch _ ->
+                            Element.el [ errorColor ] (Element.text "Found errors")
 
                         CouldNotOpenDefaultBranchZip ->
                             Element.el [ errorColor ] (Element.text "Could not open branch zip")
@@ -253,35 +243,14 @@ packageView packageName status =
         , case status of
             FetchedAndChecked_ { result } ->
                 case result of
-                    RuleErrors { errors } ->
-                        List.map
-                            (\{ ruleName, message } ->
-                                Element.paragraph
-                                    []
-                                    [ Element.text <| ruleName ++ ": " ++ message ]
-                            )
-                            errors
-                            |> Element.column [ errorColor ]
+                    RuleErrorsFromDefaultBranch ruleResult ->
+                        showRuleResult ruleResult
 
-                    RuleErrorsFromTag { errors } ->
-                        List.map
-                            (\{ ruleName, message } ->
-                                Element.paragraph
-                                    []
-                                    [ Element.text <| ruleName ++ ": " ++ message ]
-                            )
-                            errors
-                            |> Element.column [ errorColor ]
+                    RuleErrorsFromTag ruleResult ->
+                        showRuleResult ruleResult
 
-                    RuleErrorsAndPullRequest errors _ ->
-                        List.map
-                            (\{ ruleName, message } ->
-                                Element.paragraph
-                                    []
-                                    [ Element.text <| ruleName ++ ": " ++ message ]
-                            )
-                            errors
-                            |> Element.column [ errorColor ]
+                    RuleErrorsAndDefaultBranchAndTagMatch ruleResult ->
+                        showRuleResult ruleResult
 
                     HttpError httpError ->
                         Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
@@ -293,6 +262,32 @@ packageView packageName status =
                 Element.none
         ]
     )
+
+
+showRuleResult : RunRuleResult PullRequestStatus -> Element msg
+showRuleResult ruleResult =
+    case ruleResult of
+        RunRuleSuccessful errors _ pullRequestStatus ->
+            List.map
+                (\{ ruleName, message } ->
+                    Element.paragraph
+                        []
+                        [ Element.text <| ruleName ++ ": " ++ message ]
+                )
+                errors
+                |> Element.column [ errorColor ]
+
+        ParsingError ->
+            Element.text "Parsing error"
+
+        IncorrectProject ->
+            Element.text "Incorrect project"
+
+        NotEnoughIterations ->
+            Element.text "Not enough iterations"
+
+        NotAnElm19xPackage ->
+            Element.text "Not an Elm 19.x package"
 
 
 httpErrorToString error =

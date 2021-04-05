@@ -4,12 +4,15 @@ import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
 import Bytes exposing (Bytes)
 import Dict exposing (Dict)
+import Elm.Constraint
 import Elm.Docs
+import Elm.Package
 import Elm.Project
 import Elm.Syntax.Range exposing (Range)
 import Elm.Version exposing (Version)
 import Http
 import Lamdera exposing (ClientId, SessionId)
+import List.Nonempty exposing (Nonempty)
 import Set exposing (Set)
 import Url exposing (Url)
 
@@ -171,17 +174,46 @@ type ReviewResult
     | HttpError Http.Error
     | InvalidPackageName
     | NoErrors
-    | RuleErrorsFromDefaultBranch RunRuleResult
-    | RuleErrorsFromTag RunRuleResult
-    | RuleErrorsAndPullRequest { errors : List Error, pullRequestUrl : String }
+    | RuleErrorsFromDefaultBranch (RunRuleResult PullRequestStatus)
+    | RuleErrorsFromTag (RunRuleResult PullRequestStatus)
+    | RuleErrorsAndDefaultBranchAndTagMatch (RunRuleResult PullRequestStatus)
 
 
-type RunRuleResult
+type PullRequestStatus
+    = PullRequestNotSent
+    | Sent
+    | Failed Http.Error
+
+
+type RunRuleResult a
     = ParsingError
     | IncorrectProject
     | NotEnoughIterations
-    | RunRuleSuccessful (List Error) String
+    | RunRuleSuccessful (List Error) String a
     | NotAnElm19xPackage
+    | DependenciesDontExist (Nonempty Elm.Package.Name)
+
+
+mapRunRuleResult : (a -> b) -> RunRuleResult a -> RunRuleResult b
+mapRunRuleResult mapData result =
+    case result of
+        RunRuleSuccessful errors newElmJson data ->
+            RunRuleSuccessful errors newElmJson (mapData data)
+
+        ParsingError ->
+            ParsingError
+
+        IncorrectProject ->
+            IncorrectProject
+
+        NotEnoughIterations ->
+            NotEnoughIterations
+
+        NotAnElm19xPackage ->
+            NotAnElm19xPackage
+
+        DependenciesDontExist packageNames ->
+            DependenciesDontExist packageNames
 
 
 type ToFrontend
