@@ -226,7 +226,7 @@ packageView packageName status =
                         IncorrectProject ->
                             Element.el [ errorColor ] (Element.text "Incorrect project")
 
-                        CouldNotOpenBranchZip ->
+                        CouldNotOpenDefaultBranchZip ->
                             Element.el [ errorColor ] (Element.text "Could not open branch zip")
 
                         CouldNotOpenTagZip ->

@@ -19,6 +19,8 @@ import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
 import Parser exposing (Parser)
+import Review.Error
+import Review.Fix
 import Review.Project
 import Review.Project.Dependency
 import Review.Rule
@@ -579,51 +581,42 @@ reportErrors repo owner elmJson model =
                             case Zip.fromBytes bytes of
                                 Just zip ->
                                     case ( checkPackage elmJson model.cachedPackages zip, branch.commitSha == tag.commitSha ) of
-                                        ( Ok ( ruleErrors, elmJsonText ), True ) ->
+                                        ( RunRuleSuccessful errors elmJsonText, True ) ->
                                             createPullRequest
-                                                (List.length ruleErrors)
+                                                (List.length errors)
                                                 elmJsonText
                                                 owner
                                                 repo
                                                 defaultBranch
-                                                |> Task.map (.url >> RuleErrorsAndPullRequest ruleErrors)
+                                                |> Task.map (\{ url } -> RuleErrorsAndPullRequest { errors = errors, pullRequestUrl = url })
 
-                                        ( Ok ( ruleErrors, elmJsonText ), False ) ->
+                                        ( RunRuleSuccessful result elmJsonText, False ) ->
                                             Task.succeed
-                                                (RuleErrors { errors = ruleErrors, modifiedElmJsonText = elmJsonText })
+                                                (RuleErrorsFromDefaultBranch (RunRuleSuccessful result elmJsonText))
 
-                                        ( Err _, False ) ->
+                                        ( _, False ) ->
                                             Github.getCommitZip
                                                 { authToken = Env.githubAuth
                                                 , repo = repo
                                                 , owner = owner
                                                 , sha = tag.commitSha
                                                 }
-                                                |> Task.andThen
+                                                |> Task.map
                                                     (\bytes2 ->
                                                         case Zip.fromBytes bytes2 of
                                                             Just zip2 ->
-                                                                case checkPackage elmJson model.cachedPackages zip2 of
-                                                                    Ok ( ruleErrors, elmJsonText ) ->
-                                                                        Task.succeed
-                                                                            (RuleErrorsFromTag
-                                                                                { errors = ruleErrors
-                                                                                , modifiedElmJsonText = elmJsonText
-                                                                                }
-                                                                            )
-
-                                                                    Err error ->
-                                                                        Task.succeed error
+                                                                checkPackage elmJson model.cachedPackages zip2
+                                                                    |> RuleErrorsFromTag
 
                                                             Nothing ->
-                                                                Task.succeed CouldNotOpenTagZip
+                                                                CouldNotOpenTagZip
                                                     )
 
-                                        ( Err _, True ) ->
+                                        ( _, True ) ->
                                             Task.succeed CouldNotOpenTagZip
 
                                 Nothing ->
-                                    Task.succeed CouldNotOpenBranchZip
+                                    Task.succeed CouldNotOpenDefaultBranchZip
                         )
             )
         |> Task.onError (HttpError >> Task.succeed)
@@ -722,7 +715,7 @@ project elmJson srcModules testModules =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result ReviewResult ( List Error, String )
+checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> RunRuleResult
 checkPackage elmJson cached zip =
     let
         modules : String -> List { path : String, source : String }
@@ -809,9 +802,98 @@ checkPackage elmJson cached zip =
     case Version.fromTuple ( 0, 19, 1 ) of
         Just version ->
             if Elm.Constraint.check version elmJson.elm then
-                Review.Rule.reviewV2 [ NoUnused.Dependencies.rule ] Nothing projectWithDependencies
-                    |> .errors
-                    |> List.map
+                runRule 100 NoUnused.Dependencies.rule Nothing [] projectWithDependencies
+                --let
+                --    { errors, projectData } =
+                --        Review.Rule.reviewV2 [ NoUnused.Dependencies.rule ] Nothing projectWithDependencies
+                --in
+                --errors
+                --    |> List.map
+                --        (\error ->
+                --            { message = Review.Rule.errorMessage error
+                --            , ruleName = Review.Rule.errorRuleName error
+                --            , filePath = Review.Rule.errorFilePath error
+                --            , details = Review.Rule.errorDetails error
+                --            , range = Review.Rule.errorRange error
+                --            }
+                --        )
+                --    |> (\errors ->
+                --            if List.any (\error -> error.ruleName == "ParsingError") errors then
+                --                Err ParsingError
+                --
+                --            else if List.any (\error -> error.ruleName == "Incorrect project") errors then
+                --                Err IncorrectProject
+                --
+                --            else
+                --                Ok ( errors, elmJsonText )
+                --       )
+
+            else
+                NotAnElm19xPackage
+
+        Nothing ->
+            -- Should never happen
+            NotAnElm19xPackage
+
+
+runRule :
+    Int
+    -> Review.Rule.Rule
+    -> Maybe Review.Rule.ProjectData
+    -> List Review.Rule.ReviewError
+    -> Review.Project.Project
+    -> RunRuleResult
+runRule stepsLeft rule projectData errors projectWithDependencies =
+    let
+        result : { errors : List Review.Rule.ReviewError, rules : List Review.Rule.Rule, projectData : Maybe Review.Rule.ProjectData }
+        result =
+            Review.Rule.reviewV2 [ rule ] projectData projectWithDependencies
+
+        elmJsonFixes : List ( Review.Rule.ReviewError, List Review.Fix.Fix )
+        elmJsonFixes =
+            List.filterMap
+                (\error ->
+                    if Review.Rule.errorFilePath error == "elm.json" then
+                        case Review.Rule.errorFixes error of
+                            Just fixes ->
+                                Just ( error, fixes )
+
+                            Nothing ->
+                                Nothing
+
+                    else
+                        Nothing
+                )
+                result.errors
+    in
+    if stepsLeft <= 0 then
+        NotEnoughIterations
+
+    else if List.any (\error -> Review.Rule.errorRuleName error == "ParsingError") result.errors then
+        ParsingError
+
+    else if List.any (\error -> Review.Rule.errorRuleName error == "Incorrect project") result.errors then
+        IncorrectProject
+
+    else
+        case ( elmJsonFixes, Review.Project.elmJson projectWithDependencies ) of
+            ( ( error, fixes ) :: _, Just elmJson ) ->
+                Review.Project.addElmJson
+                    { elmJson
+                        | raw =
+                            case Review.Fix.fix Review.Error.ElmJson fixes elmJson.raw of
+                                Review.Fix.Successful newRaw ->
+                                    newRaw
+
+                                Review.Fix.Errored _ ->
+                                    elmJson.raw
+                    }
+                    projectWithDependencies
+                    |> runRule (stepsLeft - 1) rule projectData (error :: errors)
+
+            ( [], Just elmJson ) ->
+                RunRuleSuccessful
+                    (List.map
                         (\error ->
                             { message = Review.Rule.errorMessage error
                             , ruleName = Review.Rule.errorRuleName error
@@ -820,23 +902,12 @@ checkPackage elmJson cached zip =
                             , range = Review.Rule.errorRange error
                             }
                         )
-                    |> (\errors ->
-                            if List.any (\error -> error.ruleName == "ParsingError") errors then
-                                Err ParsingError
+                        errors
+                    )
+                    elmJson.raw
 
-                            else if List.any (\error -> error.ruleName == "Incorrect project") errors then
-                                Err IncorrectProject
-
-                            else
-                                Ok ( errors, elmJsonText )
-                       )
-
-            else
-                Err NotAnElm19xPackage
-
-        Nothing ->
-            -- Should never happen
-            Err NotAnElm19xPackage
+            _ ->
+                IncorrectProject
 
 
 addDependency : Elm.Project.PackageInfo -> List Elm.Docs.Module -> Review.Project.Project -> Review.Project.Project

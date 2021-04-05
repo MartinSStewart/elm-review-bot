@@ -165,18 +165,23 @@ type BackendMsg
 
 
 type ReviewResult
-    = NotAnElm19xPackage
-    | ParsingError
-    | IncorrectProject
-    | CouldNotOpenBranchZip
+    = CouldNotOpenDefaultBranchZip
     | CouldNotOpenTagZip
     | PackageTagNotFound
     | HttpError Http.Error
     | InvalidPackageName
     | NoErrors
-    | RuleErrors { errors : List Error, modifiedElmJsonText : String }
-    | RuleErrorsFromTag { errors : List Error, modifiedElmJsonText : String }
-    | RuleErrorsAndPullRequest (List Error) String
+    | RuleErrorsFromDefaultBranch RunRuleResult
+    | RuleErrorsFromTag RunRuleResult
+    | RuleErrorsAndPullRequest { errors : List Error, pullRequestUrl : String }
+
+
+type RunRuleResult
+    = ParsingError
+    | IncorrectProject
+    | NotEnoughIterations
+    | RunRuleSuccessful (List Error) String
+    | NotAnElm19xPackage
 
 
 type ToFrontend
