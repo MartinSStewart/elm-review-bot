@@ -76,7 +76,7 @@ update msg model =
 
         PressedCreateFork ->
             ( model
-            , Backend.createPullRequest "test" "MartinSStewart" "elm-serialize" "master"
+            , Backend.createPullRequest 1 "test" "MartinSStewart" "elm-serialize" "master"
                 |> Task.attempt CreateForkResult
             )
 
@@ -207,11 +207,14 @@ packageView packageName status =
                                 (Element.text "Passed")
 
                         RuleErrors _ ->
-                            Element.el [ errorColor ] (Element.text "Found errors")
+                            Element.el [ errorColor ] (Element.text "Found errors but the default branch doesn't match package tag ")
+
+                        RuleErrorsFromTag _ ->
+                            Element.el [ errorColor ] (Element.text "Found errors in package tag but failed to handle default branch")
 
                         RuleErrorsAndPullRequest _ url ->
                             Element.newTabLink
-                                [ Element.Font.color <| Element.rgb 0.1 0.1 0.8 ]
+                                [ Element.Font.color <| Element.rgb 0.1 0.1 0.9 ]
                                 { url = url, label = Element.text "Found errors and created PR" }
 
                         NotAnElm19xPackage ->
@@ -250,7 +253,17 @@ packageView packageName status =
         , case status of
             FetchedAndChecked_ { result } ->
                 case result of
-                    RuleErrors errors ->
+                    RuleErrors { errors } ->
+                        List.map
+                            (\{ ruleName, message } ->
+                                Element.paragraph
+                                    []
+                                    [ Element.text <| ruleName ++ ": " ++ message ]
+                            )
+                            errors
+                            |> Element.column [ errorColor ]
+
+                    RuleErrorsFromTag { errors } ->
                         List.map
                             (\{ ruleName, message } ->
                                 Element.paragraph

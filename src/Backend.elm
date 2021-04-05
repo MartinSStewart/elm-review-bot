@@ -385,21 +385,25 @@ nextTodo model =
                                     Just ( packageName, packageStatus )
 
                                 Fetched { elmJson } ->
-                                    case currentTodo_ of
-                                        Just ( _, Pending _ _ ) ->
-                                            currentTodo_
+                                    if String.startsWith "elm/" packageName then
+                                        currentTodo_
 
-                                        _ ->
-                                            if
-                                                List.count
-                                                    (Types.packageVersion >> Version.compare elmJson.version >> (/=) GT)
-                                                    versions
-                                                    == 1
-                                            then
-                                                Just ( packageName, packageStatus )
-
-                                            else
+                                    else
+                                        case currentTodo_ of
+                                            Just ( _, Pending _ _ ) ->
                                                 currentTodo_
+
+                                            _ ->
+                                                if
+                                                    List.count
+                                                        (Types.packageVersion >> Version.compare elmJson.version >> (/=) GT)
+                                                        versions
+                                                        == 1
+                                                then
+                                                    Just ( packageName, packageStatus )
+
+                                                else
+                                                    currentTodo_
 
                                 FetchedAndChecked _ ->
                                     currentTodo_
@@ -439,8 +443,8 @@ nextTodo model =
             Cmd.none
 
 
-createPullRequest : String -> String -> String -> String -> Task Http.Error { url : String }
-createPullRequest elmJsonContent originalOwner originalRepo branchName =
+createPullRequest : Int -> String -> String -> String -> String -> Task Http.Error { url : String }
+createPullRequest changeCount elmJsonContent originalOwner originalRepo branchName =
     Github.createFork
         { authToken = Env.githubAuth, owner = originalOwner, repo = originalRepo }
         |> Task.andThen
@@ -506,10 +510,41 @@ createPullRequest elmJsonContent originalOwner originalRepo branchName =
                                 , destinationBranch = branchName
                                 , sourceBranch = branchName
                                 , title = "Remove unused dependencies"
-                                , description = "I found some unused dependencies in your package."
+                                , description = pullRequestMessage changeCount
                                 }
                         )
             )
+
+
+pullRequestMessage : Int -> String
+pullRequestMessage changeCount =
+    "Hello :wave:!\n\n"
+        ++ (if changeCount == 1 then
+                "I noticed an unused dependency in your package. Here is a pull request to remove it. After this gets merged, I recommend publishing a new release, unless you are working on something else in the meantime.\n"
+
+            else
+                "I noticed there were unused dependencies in your package. Here is a pull request to remove them. After this gets merged, I recommend publishing a new release, unless you are working on something else in the meantime.\n"
+           )
+        ++ """
+I found this issue using [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/) and the [`jfmengels/elm-review-unused` package](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/). You can re-create my findings by running this command:
+
+```bash
+npx elm-review --template jfmengels/elm-review-unused/example --rules NoUnused.Dependency
+```
+
+If you like these findings and want to find more dead code in your code, you can add `elm-review` to your project like this:
+
+```bash
+npx elm-review init --template jfmengels/elm-review-unused/example
+# then to run it:
+npx elm-review # reports problems
+npx elm-review --fix # fixes the issue.
+```
+More information on how to get started in the [`elm-review` documentation](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/), and you can read more about [how dead code removal](https://jfmengels.net/safe-dead-code-removal/) is done using this tool.
+
+Note that this pull request was made automatically (by @MartinSStewart). If you so wish, you can tell me to stop making pull requests like this by writing "please stop".
+
+Have a nice day!"""
 
 
 reportErrors : String -> String -> Elm.Project.PackageInfo -> BackendModel -> Task Never ReviewResult
@@ -517,39 +552,65 @@ reportErrors repo owner elmJson model =
     Github.getRepository { authToken = Env.githubAuth, repo = repo, owner = owner }
         |> Task.andThen
             (\{ defaultBranch } ->
-                Github.getBranchZip { authToken = Env.githubAuth, branchName = defaultBranch, repo = repo, owner = owner }
+                Task.map3 (\a b c -> ( a, b, c ))
+                    (Github.getBranch
+                        { authToken = Env.githubAuth
+                        , repo = repo
+                        , owner = owner
+                        , branchName = defaultBranch
+                        }
+                    )
+                    (Github.getTag
+                        { authToken = Env.githubAuth
+                        , repo = repo
+                        , owner = owner
+                        , tagName = Version.toString elmJson.version
+                        }
+                    )
+                    (Github.getBranchZip
+                        { authToken = Env.githubAuth
+                        , branchName = defaultBranch
+                        , repo = repo
+                        , owner = owner
+                        }
+                    )
                     |> Task.andThen
-                        (\bytes ->
+                        (\( branch, tag, bytes ) ->
                             case Zip.fromBytes bytes of
                                 Just zip ->
-                                    case checkPackage elmJson model.cachedPackages zip of
-                                        Ok ruleErrors ->
-                                            createPullRequest "test" owner repo defaultBranch
+                                    case ( checkPackage elmJson model.cachedPackages zip, branch.commitSha == tag.commitSha ) of
+                                        ( Ok ( ruleErrors, elmJsonText ), True ) ->
+                                            createPullRequest
+                                                (List.length ruleErrors)
+                                                elmJsonText
+                                                owner
+                                                repo
+                                                defaultBranch
                                                 |> Task.map (.url >> RuleErrorsAndPullRequest ruleErrors)
 
-                                        Err _ ->
-                                            Github.getTag
+                                        ( Ok ( ruleErrors, elmJsonText ), False ) ->
+                                            Task.succeed
+                                                (RuleErrors { errors = ruleErrors, modifiedElmJsonText = elmJsonText })
+
+                                        ( Err _, False ) ->
+                                            Github.getCommitZip
                                                 { authToken = Env.githubAuth
                                                 , repo = repo
                                                 , owner = owner
-                                                , tagName = Version.toString elmJson.version
+                                                , sha = tag.commitSha
                                                 }
-                                                |> Task.andThen
-                                                    (\tag ->
-                                                        Github.getCommitZip
-                                                            { authToken = Env.githubAuth
-                                                            , repo = repo
-                                                            , owner = owner
-                                                            , sha = tag.commitSha
-                                                            }
-                                                    )
                                                 |> Task.andThen
                                                     (\bytes2 ->
                                                         case Zip.fromBytes bytes2 of
                                                             Just zip2 ->
                                                                 case checkPackage elmJson model.cachedPackages zip2 of
-                                                                    Ok ruleErrors ->
-                                                                        Task.succeed (RuleErrors ruleErrors)
+                                                                    Ok ( ruleErrors, elmJsonText ) ->
+                                                                        Task.succeed
+                                                                            (RuleErrorsFromTag
+                                                                                { errors = ruleErrors
+                                                                                , modifiedElmJsonText = elmJsonText
+                                                                                }
+                                                                            )
 
                                                                     Err error ->
                                                                         Task.succeed error
@@ -557,6 +618,9 @@ reportErrors repo owner elmJson model =
                                                             Nothing ->
                                                                 Task.succeed CouldNotOpenTagZip
                                                     )
+
+                                        ( Err _, True ) ->
+                                            Task.succeed CouldNotOpenTagZip
 
                                 Nothing ->
                                     Task.succeed CouldNotOpenBranchZip
@@ -651,7 +715,6 @@ project elmJson srcModules testModules =
         |> List.map (\( _, module_ ) -> { path = module_.path, source = module_.source })
         |> (++) testModules
         |> List.foldl Review.Project.addModule Review.Project.new
-        |> Debug.log ""
         |> Review.Project.addElmJson
             { path = "src/elm.json"
             , raw = Elm.Project.Package elmJson |> Elm.Project.encode |> Json.Encode.encode 0
@@ -659,7 +722,7 @@ project elmJson srcModules testModules =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result ReviewResult (List Error)
+checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> Result ReviewResult ( List Error, String )
 checkPackage elmJson cached zip =
     let
         modules : String -> List { path : String, source : String }
@@ -739,6 +802,9 @@ checkPackage elmJson cached zip =
                 )
                 (project elmJson (modules "src") (modules "tests"))
                 elmJson.deps
+
+        elmJsonText =
+            Elm.Project.Package elmJson |> Elm.Project.encode |> Json.Encode.encode 4
     in
     case Version.fromTuple ( 0, 19, 1 ) of
         Just version ->
@@ -762,7 +828,7 @@ checkPackage elmJson cached zip =
                                 Err IncorrectProject
 
                             else
-                                Ok errors
+                                Ok ( errors, elmJsonText )
                        )
 
             else

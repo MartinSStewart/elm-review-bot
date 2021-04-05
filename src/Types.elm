@@ -174,7 +174,8 @@ type ReviewResult
     | HttpError Http.Error
     | InvalidPackageName
     | NoErrors
-    | RuleErrors (List Error)
+    | RuleErrors { errors : List Error, modifiedElmJsonText : String }
+    | RuleErrorsFromTag { errors : List Error, modifiedElmJsonText : String }
     | RuleErrorsAndPullRequest (List Error) String
 
 
