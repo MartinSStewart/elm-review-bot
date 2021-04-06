@@ -17,7 +17,6 @@ import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
 import Parser exposing (Parser)
-import Review.Error
 import Review.Fix
 import Review.Project
 import Review.Project.Dependency
@@ -675,7 +674,7 @@ checkPackage elmJson cached zip =
 
         ( projectWithDependencies, missingPackages ) =
             List.foldl
-                (\( packageName, constraint ) ( state, missingPackages ) ->
+                (\( packageName, constraint ) ( state, missingPackages_ ) ->
                     case Dict.get (Elm.Package.toString packageName) cached of
                         Just packages ->
                             case
@@ -708,13 +707,13 @@ checkPackage elmJson cached zip =
                                     |> List.maximumWith (\( a, _ ) ( b, _ ) -> Version.compare a b)
                             of
                                 Just ( _, ( elmJson_, docs_ ) ) ->
-                                    ( addDependency elmJson_ docs_ state, missingPackages )
+                                    ( addDependency elmJson_ docs_ state, missingPackages_ )
 
                                 Nothing ->
-                                    ( state, missingPackages )
+                                    ( state, missingPackages_ )
 
                         Nothing ->
-                            ( state, packageName :: missingPackages )
+                            ( state, packageName :: missingPackages_ )
                 )
                 ( project elmJson (modules "src") (modules "tests"), [] )
                 elmJson.deps
@@ -782,7 +781,7 @@ runRule stepsLeft rule projectData errors projectWithDependencies =
                 Review.Project.addElmJson
                     { elmJson
                         | raw =
-                            case Review.Fix.fix Review.Error.ElmJson fixes elmJson.raw of
+                            case Review.Fix.fix (Review.Rule.errorTarget error) fixes elmJson.raw of
                                 Review.Fix.Successful newRaw ->
                                     newRaw
 

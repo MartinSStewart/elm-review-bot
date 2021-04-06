@@ -2,9 +2,7 @@ module Types exposing (..)
 
 import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
-import Bytes exposing (Bytes)
 import Dict exposing (Dict)
-import Elm.Constraint
 import Elm.Docs
 import Elm.Package
 import Elm.Project

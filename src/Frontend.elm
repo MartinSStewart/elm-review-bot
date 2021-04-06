@@ -1,6 +1,5 @@
 module Frontend exposing (..)
 
-import Backend
 import Browser exposing (UrlRequest(..))
 import Browser.Navigation as Nav
 import Dict
@@ -8,12 +7,13 @@ import Element exposing (Element)
 import Element.Background
 import Element.Font
 import Element.Input
+import Elm.Package
 import Elm.Version
 import Html
 import Http
 import Lamdera
 import List.Extra as List
-import Task
+import List.Nonempty
 import Types exposing (..)
 import Url
 
@@ -288,6 +288,14 @@ showRuleResult ruleResult =
 
         NotAnElm19xPackage ->
             Element.text "Not an Elm 19.x package"
+
+        DependenciesDontExist nonempty ->
+            List.Nonempty.toList nonempty
+                |> List.map Elm.Package.toString
+                |> String.join ", "
+                |> (++) "Missing dependencies: "
+                |> Element.text
+
 
 
 httpErrorToString error =
