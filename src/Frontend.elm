@@ -25,7 +25,7 @@ app =
         , onUrlChange = UrlChanged
         , update = update
         , updateFromBackend = updateFromBackend
-        , subscriptions = \m -> Sub.none
+        , subscriptions = \_ -> Sub.none
         , view = view
         }
 
@@ -82,10 +82,6 @@ update msg model =
             )
 
         CreateForkResult result ->
-            let
-                _ =
-                    Debug.log "fork" result
-            in
             ( model, Cmd.none )
 
 

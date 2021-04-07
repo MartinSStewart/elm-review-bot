@@ -7,7 +7,7 @@ import NoUnused.Dependencies exposing (rule)
 import Review.Project as Project exposing (Project)
 import Review.Project.Dependency as Dependency exposing (Dependency)
 import Review.Test
-import Test exposing (Test, describe, only, test)
+import Test exposing (Test, describe, test)
 
 
 createProject : Maybe String -> String -> Project
@@ -69,58 +69,6 @@ applicationElmJson =
 
 packageElmJson : String
 packageElmJson =
-    """
-{
-    "type": "package",
-    "name": "author/package",
-    "summary": "Summary",
-    "license": "BSD-3-Clause",
-    "version": "1.0.0",
-    "exposed-modules": [
-        "Exposed"
-    ],
-    "elm-version": "0.19.0 <= v < 0.20.0",
-    "dependencies": {
-        "elm/core": "1.0.0 <= v < 2.0.0",
-        "author/package-with-foo": "1.0.0 <= v < 2.0.0",
-        "author/package-with-bar": "1.0.0 <= v < 2.0.0"
-    },
-    "test-dependencies": {
-        "author/package-with-test-foo": "1.0.0 <= v < 2.0.0",
-        "author/package-with-test-bar": "1.0.0 <= v < 2.0.0"
-    }
-}"""
-
-
-applicationElmJsonWithTests : String
-applicationElmJsonWithTests =
-    """
-{
-    "type": "application",
-    "source-directories": [
-        "src"
-    ],
-    "elm-version": "0.19.1",
-    "dependencies": {
-        "direct": {
-            "elm/core": "1.0.0",
-            "author/package-with-foo": "1.0.0",
-            "author/package-with-bar": "1.0.0"
-        },
-        "indirect": {}
-    },
-    "test-dependencies": {
-        "direct": {
-            "author/package-with-test-foo": "1.0.0",
-            "author/package-with-test-bar": "1.0.0"
-        },
-        "indirect": {}
-    }
-}"""
-
-
-packageElmJsonWithTests : String
-packageElmJsonWithTests =
     """
 {
     "type": "package",

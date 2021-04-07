@@ -11,9 +11,24 @@ when inside the directory containing this file.
 
 -}
 
-import Review.Rule exposing (Rule)
+import NoUnused.CustomTypeConstructorArgs
+import NoUnused.CustomTypeConstructors
 import NoUnused.Dependencies
+import NoUnused.Exports
+import NoUnused.Modules
+import NoUnused.Parameters
+import NoUnused.Variables
+import Review.Rule exposing (Rule)
+
 
 config : List Rule
 config =
-    [ NoUnused.Dependencies.rule ]
+    [ NoUnused.Dependencies.rule
+    , NoUnused.CustomTypeConstructorArgs.rule
+    , NoUnused.CustomTypeConstructors.rule []
+    , NoUnused.Exports.rule
+    , NoUnused.Modules.rule
+    , NoUnused.Parameters.rule
+    , NoUnused.Variables.rule
+    ]
+        |> List.map (Review.Rule.ignoreErrorsForDirectories [ "src/NoUnused", "src/Vendor", "src/Evergreen" ])

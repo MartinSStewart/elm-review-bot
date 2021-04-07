@@ -1,7 +1,7 @@
 module Backend exposing (..)
 
 import Dict exposing (Dict)
-import Elm.Constraint exposing (Constraint)
+import Elm.Constraint
 import Elm.Docs
 import Elm.Module
 import Elm.Package
@@ -21,7 +21,7 @@ import Review.Fix
 import Review.Project
 import Review.Project.Dependency
 import Review.Rule
-import Set exposing (Set)
+import Set
 import Task exposing (Task)
 import Types exposing (..)
 import Zip exposing (Zip)
@@ -391,15 +391,15 @@ createPullRequest changeCount elmJsonContent originalOwner originalRepo branchNa
                     , branchName = branchName
                     }
                     |> Task.andThen
-                        (\branch ->
+                        (\commitSha ->
                             Github.getCommit
                                 { authToken = Env.githubAuth
                                 , repo = fork.repo
                                 , owner = fork.owner
-                                , sha = branch.commitSha
+                                , sha = commitSha
                                 }
                                 |> Task.andThen
-                                    (\{ treeSha } ->
+                                    (\treeSha ->
                                         Github.createTree
                                             { authToken = Env.githubAuth
                                             , owner = fork.owner
@@ -409,7 +409,7 @@ createPullRequest changeCount elmJsonContent originalOwner originalRepo branchNa
                                                   , content = elmJsonContent
                                                   }
                                                 ]
-                                            , baseTree = Just branch.commitSha
+                                            , baseTree = Just treeSha
                                             }
                                             |> Task.andThen
                                                 (\tree ->
@@ -419,7 +419,7 @@ createPullRequest changeCount elmJsonContent originalOwner originalRepo branchNa
                                                         , owner = fork.owner
                                                         , message = "Remove unused dependencies"
                                                         , tree = tree.treeSha
-                                                        , parents = [ branch.commitSha ]
+                                                        , parents = [ commitSha ]
                                                         }
                                                 )
                                     )
@@ -510,10 +510,10 @@ reportErrors owner repo elmJson model =
                         }
                     )
                     |> Task.andThen
-                        (\( branch, tag, bytes ) ->
+                        (\( branchSha, tagSha, bytes ) ->
                             case Zip.fromBytes bytes of
                                 Just zip ->
-                                    case ( checkPackage elmJson model.cachedPackages zip, branch.commitSha == tag.commitSha ) of
+                                    case ( checkPackage elmJson model.cachedPackages zip, branchSha == tagSha ) of
                                         ( RunRuleSuccessful errors elmJsonText (), True ) ->
                                             RuleErrorsAndDefaultBranchAndTagMatch (RunRuleSuccessful errors elmJsonText PullRequestNotSent)
                                                 |> Task.succeed
@@ -534,7 +534,7 @@ reportErrors owner repo elmJson model =
                                                 { authToken = Env.githubAuth
                                                 , repo = repo
                                                 , owner = owner
-                                                , sha = tag.commitSha
+                                                , sha = tagSha
                                                 }
                                                 |> Task.map
                                                     (\bytes2 ->

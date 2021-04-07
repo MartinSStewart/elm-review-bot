@@ -6,7 +6,7 @@ module Github exposing
     , getFileContents, updateFileContents
     , createFork
     , getComments, createComment
-    , Owner, ShaHash, createBlob, createTree, getBranchZip, getCommitZip, getRepository, getTag, getTree, owner, ownerToString, sha, shaToString, updateBranch
+    , Owner, ShaHash, createTree, getBranchZip, getCommitZip, getRepository, getTag, owner, ownerToString, sha, shaToString, updateBranch
     )
 
 {-|
@@ -75,7 +75,7 @@ getBranchZip params =
         }
 
 
-getCommitZip : { authToken : AuthToken, owner : Owner, repo : String, sha : ShaHash } -> Task Http.Error Bytes
+getCommitZip : { authToken : AuthToken, owner : Owner, repo : String, sha : ShaHash CommitSha } -> Task Http.Error Bytes
 getCommitZip params =
     Http.task
         { method = "GET"
@@ -96,49 +96,19 @@ getCommit :
     { authToken : AuthToken
     , owner : Owner
     , repo : String
-    , sha : ShaHash
+    , sha : ShaHash CommitSha
     }
-    -> Task Http.Error { treeSha : ShaHash }
+    -> Task Http.Error (ShaHash TreeSha)
 getCommit params =
     let
         decoder =
-            Json.Decode.map
-                (\treeSha -> { treeSha = treeSha })
-                (Json.Decode.at [ "tree", "sha" ] decodeSha)
+            Json.Decode.at [ "tree", "sha" ] decodeSha
     in
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/commits/" ++ shaToString params.sha
         , body = Http.emptyBody
-        , resolver = jsonResolver decoder
-        , timeout = Nothing
-        }
-
-
-{-| See <https://docs.github.com/en/rest/reference/git#create-a-blob>
-
-NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
-
--}
-createBlob :
-    { authToken : AuthToken
-    , owner : Owner
-    , repo : String
-    , content : String
-    }
-    -> Task Http.Error ShaHash
-createBlob params =
-    let
-        decoder =
-            Json.Decode.field "sha" Json.Decode.string
-                |> Json.Decode.map sha
-    in
-    Http.task
-        { method = "POST"
-        , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/blobs"
-        , body = Http.jsonBody (Json.Encode.object [ ( "content", Json.Encode.string params.content ) ])
         , resolver = jsonResolver decoder
         , timeout = Nothing
         }
@@ -154,10 +124,10 @@ createCommit :
     , owner : Owner
     , repo : String
     , message : String
-    , tree : ShaHash
-    , parents : List ShaHash
+    , tree : ShaHash TreeSha
+    , parents : List (ShaHash CommitSha)
     }
-    -> Task Http.Error ShaHash
+    -> Task Http.Error (ShaHash CommitSha)
 createCommit params =
     let
         decoder =
@@ -192,12 +162,11 @@ getBranch :
     , repo : String
     , branchName : String
     }
-    -> Task Http.Error { commitSha : ShaHash }
+    -> Task Http.Error (ShaHash CommitSha)
 getBranch params =
     let
         decoder =
-            Json.Decode.map (\commitSha -> { commitSha = commitSha })
-                (Json.Decode.at [ "object", "sha" ] decodeSha)
+            Json.Decode.at [ "object", "sha" ] decodeSha
     in
     Http.task
         { method = "GET"
@@ -219,10 +188,10 @@ updateBranch :
     , owner : Owner
     , repo : String
     , branchName : String
-    , sha : ShaHash
+    , sha : ShaHash CommitSha
     , force : Bool
     }
-    -> Task Http.Error ShaHash
+    -> Task Http.Error (ShaHash CommitSha)
 updateBranch params =
     Http.task
         { method = "PATCH"
@@ -249,12 +218,11 @@ getTag :
     , repo : String
     , tagName : String
     }
-    -> Task Http.Error { commitSha : ShaHash }
+    -> Task Http.Error (ShaHash CommitSha)
 getTag params =
     let
         decoder =
-            Json.Decode.map (\commitSha -> { commitSha = commitSha })
-                (Json.Decode.at [ "object", "sha" ] decodeSha)
+            Json.Decode.at [ "object", "sha" ] decodeSha
     in
     Http.task
         { method = "GET"
@@ -266,31 +234,32 @@ getTag params =
         }
 
 
-{-| See <https://docs.github.com/en/rest/reference/git#get-a-tree>
 
-NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
-
--}
-getTree :
-    { authToken : AuthToken
-    , owner : Owner
-    , repo : String
-    , treeSha : ShaHash
-    }
-    -> Task Http.Error (List TreeNode)
-getTree params =
-    let
-        decoder =
-            Json.Decode.field "tree" (Json.Decode.list decodeTreeNode)
-    in
-    Http.task
-        { method = "GET"
-        , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/trees/" ++ shaToString params.treeSha
-        , body = Http.emptyBody
-        , resolver = jsonResolver decoder
-        , timeout = Nothing
-        }
+--{-| See <https://docs.github.com/en/rest/reference/git#get-a-tree>
+--
+--NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+--
+---}
+--getTree :
+--    { authToken : AuthToken
+--    , owner : Owner
+--    , repo : String
+--    , treeSha : ShaHash
+--    }
+--    -> Task Http.Error (List TreeNode)
+--getTree params =
+--    let
+--        decoder =
+--            Json.Decode.field "tree" (Json.Decode.list decodeTreeNode)
+--    in
+--    Http.task
+--        { method = "GET"
+--        , headers = [ authorizationHeader params.authToken ]
+--        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/trees/" ++ shaToString params.treeSha
+--        , body = Http.emptyBody
+--        , resolver = jsonResolver decoder
+--        , timeout = Nothing
+--        }
 
 
 {-| See <https://docs.github.com/en/rest/reference/git#create-a-tree>
@@ -303,9 +272,9 @@ createTree :
     , owner : Owner
     , repo : String
     , treeNodes : List { path : String, content : String }
-    , baseTree : Maybe ShaHash
+    , baseTree : Maybe (ShaHash TreeSha)
     }
-    -> Task Http.Error { treeSha : ShaHash }
+    -> Task Http.Error { treeSha : ShaHash TreeSha }
 createTree params =
     let
         decoder =
@@ -332,12 +301,14 @@ createTree params =
         }
 
 
-type TreeNode
-    = Subdirectory { path : String, sha : ShaHash }
-    | Blob { path : String, sha : ShaHash, size : Int }
-    | ExecutableBlob { path : String, sha : ShaHash, size : Int }
-    | Submodule
-    | Symlink
+
+--
+--type TreeNode
+--    = Subdirectory { path : String, sha : ShaHash }
+--    | Blob { path : String, sha : ShaHash, size : Int }
+--    | ExecutableBlob { path : String, sha : ShaHash, size : Int }
+--    | Submodule
+--    | Symlink
 
 
 encodeTreeNode : { path : String, content : String } -> Json.Encode.Value
@@ -350,38 +321,40 @@ encodeTreeNode treeNode =
         |> Json.Encode.object
 
 
-decodeTreeNode : Json.Decode.Decoder TreeNode
-decodeTreeNode =
-    Json.Decode.field "mode" Json.Decode.string
-        |> Json.Decode.andThen
-            (\mode ->
-                case String.toInt mode of
-                    Just 100644 ->
-                        Json.Decode.map3 (\path sha_ size -> Blob { path = path, sha = sha_, size = size })
-                            (Json.Decode.field "path" Json.Decode.string)
-                            (Json.Decode.field "sha" decodeSha)
-                            (Json.Decode.field "size" Json.Decode.int)
 
-                    Just 100755 ->
-                        Json.Decode.map3 (\path sha_ size -> ExecutableBlob { path = path, sha = sha_, size = size })
-                            (Json.Decode.field "path" Json.Decode.string)
-                            (Json.Decode.field "sha" decodeSha)
-                            (Json.Decode.field "size" Json.Decode.int)
-
-                    Just 40000 ->
-                        Json.Decode.map2 (\path sha_ -> Subdirectory { path = path, sha = sha_ })
-                            (Json.Decode.field "path" Json.Decode.string)
-                            (Json.Decode.field "sha" decodeSha)
-
-                    Just 160000 ->
-                        Json.Decode.succeed Submodule
-
-                    Just 120000 ->
-                        Json.Decode.succeed Symlink
-
-                    _ ->
-                        Json.Decode.fail ("Invalid mode: " ++ mode)
-            )
+--
+--decodeTreeNode : Json.Decode.Decoder TreeNode
+--decodeTreeNode =
+--    Json.Decode.field "mode" Json.Decode.string
+--        |> Json.Decode.andThen
+--            (\mode ->
+--                case String.toInt mode of
+--                    Just 100644 ->
+--                        Json.Decode.map3 (\path sha_ size -> Blob { path = path, sha = sha_, size = size })
+--                            (Json.Decode.field "path" Json.Decode.string)
+--                            (Json.Decode.field "sha" decodeSha)
+--                            (Json.Decode.field "size" Json.Decode.int)
+--
+--                    Just 100755 ->
+--                        Json.Decode.map3 (\path sha_ size -> ExecutableBlob { path = path, sha = sha_, size = size })
+--                            (Json.Decode.field "path" Json.Decode.string)
+--                            (Json.Decode.field "sha" decodeSha)
+--                            (Json.Decode.field "size" Json.Decode.int)
+--
+--                    Just 40000 ->
+--                        Json.Decode.map2 (\path sha_ -> Subdirectory { path = path, sha = sha_ })
+--                            (Json.Decode.field "path" Json.Decode.string)
+--                            (Json.Decode.field "sha" decodeSha)
+--
+--                    Just 160000 ->
+--                        Json.Decode.succeed Submodule
+--
+--                    Just 120000 ->
+--                        Json.Decode.succeed Symlink
+--
+--                    _ ->
+--                        Json.Decode.fail ("Invalid mode: " ++ mode)
+--            )
 
 
 referenceDecoder =
@@ -391,7 +364,7 @@ referenceDecoder =
 
 type alias Tag =
     { name : String
-    , commitSha : ShaHash
+    , commitSha : ShaHash CommitSha
     , nodeId : String
     }
 
@@ -435,7 +408,7 @@ createBranch :
     { authToken : AuthToken
     , repo : String
     , branchName : String
-    , sha : ShaHash
+    , sha : ShaHash CommitSha
     }
     -> Task Http.Error ()
 createBranch params =
@@ -510,7 +483,7 @@ getPullRequest :
             Http.Error
             { head :
                 { ref : String
-                , sha : ShaHash
+                , sha : ShaHash CommitSha
                 }
             }
 getPullRequest params =
@@ -601,7 +574,7 @@ getFileContents :
             Http.Error
             { encoding : String
             , content : String
-            , sha : ShaHash
+            , sha : ShaHash a
             }
 getFileContents params =
     let
@@ -637,7 +610,7 @@ updateFileContents :
     , repo : String
     , branch : String
     , path : String
-    , sha : ShaHash
+    , sha : ShaHash a
     , message : String
     , content : String
     }
@@ -645,7 +618,7 @@ updateFileContents :
         Task
             Http.Error
             { content :
-                { sha : ShaHash
+                { sha : ShaHash a
                 }
             }
 updateFileContents params =
@@ -808,26 +781,34 @@ authToken =
     AuthToken
 
 
-type ShaHash
+type TreeSha
+    = TreeSha Never
+
+
+type CommitSha
+    = CommitSha Never
+
+
+type ShaHash a
     = ShaHash String
 
 
-sha : String -> ShaHash
+sha : String -> ShaHash a
 sha =
     ShaHash
 
 
-shaToString : ShaHash -> String
+shaToString : ShaHash a -> String
 shaToString (ShaHash shaHash) =
     shaHash
 
 
-decodeSha : Json.Decode.Decoder ShaHash
+decodeSha : Json.Decode.Decoder (ShaHash a)
 decodeSha =
     Json.Decode.string |> Json.Decode.map sha
 
 
-encodeSha : ShaHash -> Json.Encode.Value
+encodeSha : ShaHash a -> Json.Encode.Value
 encodeSha =
     shaToString >> Json.Encode.string
 

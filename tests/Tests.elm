@@ -1,10 +1,8 @@
 module Tests exposing (..)
 
 import Backend
-import Elm.Package
 import Elm.Project exposing (Project(..))
-import Expect exposing (Expectation)
-import Fuzz exposing (Fuzzer, int, list, string)
+import Expect
 import Json.Decode
 import Review.Project
 import Test exposing (..)
