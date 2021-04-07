@@ -297,7 +297,6 @@ showRuleResult ruleResult =
                 |> Element.text
 
 
-
 httpErrorToString error =
     case error of
         Http.BadBody text ->

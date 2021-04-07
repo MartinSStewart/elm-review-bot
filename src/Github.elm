@@ -6,7 +6,7 @@ module Github exposing
     , getFileContents, updateFileContents
     , createFork
     , getComments, createComment
-    , ShaHash, createBlob, createTree, getBranchZip, getCommitZip, getRepository, getTag, getTree, sha, shaToString, updateBranch
+    , Owner, ShaHash, createBlob, createTree, getBranchZip, getCommitZip, getRepository, getTag, getTree, owner, ownerToString, sha, shaToString, updateBranch
     )
 
 {-|
@@ -43,7 +43,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 getRepository :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     }
     -> Task Http.Error { defaultBranch : String }
@@ -56,31 +56,31 @@ getRepository params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
         }
 
 
-getBranchZip : { authToken : AuthToken, owner : String, repo : String, branchName : String } -> Task Http.Error Bytes
+getBranchZip : { authToken : AuthToken, owner : Owner, repo : String, branchName : String } -> Task Http.Error Bytes
 getBranchZip params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://github.com/" ++ params.owner ++ "/" ++ params.repo ++ "/archive/refs/heads/" ++ params.branchName ++ ".zip"
+        , url = "https://github.com/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/archive/refs/heads/" ++ params.branchName ++ ".zip"
         , body = Http.emptyBody
         , resolver = bytesResolver
         , timeout = Nothing
         }
 
 
-getCommitZip : { authToken : AuthToken, owner : String, repo : String, sha : ShaHash } -> Task Http.Error Bytes
+getCommitZip : { authToken : AuthToken, owner : Owner, repo : String, sha : ShaHash } -> Task Http.Error Bytes
 getCommitZip params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://github.com/" ++ params.owner ++ "/" ++ params.repo ++ "/archive/" ++ shaToString params.sha ++ ".zip"
+        , url = "https://github.com/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/archive/" ++ shaToString params.sha ++ ".zip"
         , body = Http.emptyBody
         , resolver = bytesResolver
         , timeout = Nothing
@@ -94,7 +94,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 getCommit :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , sha : ShaHash
     }
@@ -109,7 +109,7 @@ getCommit params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/commits/" ++ shaToString params.sha
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/commits/" ++ shaToString params.sha
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
@@ -123,7 +123,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 createBlob :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , content : String
     }
@@ -137,7 +137,7 @@ createBlob params =
     Http.task
         { method = "POST"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs"
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/blobs"
         , body = Http.jsonBody (Json.Encode.object [ ( "content", Json.Encode.string params.content ) ])
         , resolver = jsonResolver decoder
         , timeout = Nothing
@@ -151,7 +151,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 createCommit :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , message : String
     , tree : ShaHash
@@ -167,7 +167,7 @@ createCommit params =
     Http.task
         { method = "POST"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/commits"
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/commits"
         , body =
             Http.jsonBody
                 (Json.Encode.object
@@ -188,7 +188,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 getBranch :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , branchName : String
     }
@@ -202,7 +202,7 @@ getBranch params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ params.branchName
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ params.branchName
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
@@ -216,7 +216,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 updateBranch :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , branchName : String
     , sha : ShaHash
@@ -227,7 +227,7 @@ updateBranch params =
     Http.task
         { method = "PATCH"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ params.branchName
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ params.branchName
         , body =
             Http.jsonBody
                 (Json.Encode.object
@@ -245,7 +245,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 getTag :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , tagName : String
     }
@@ -259,7 +259,7 @@ getTag params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/tags/" ++ params.tagName
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/refs/tags/" ++ params.tagName
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
@@ -273,7 +273,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 getTree :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , treeSha : ShaHash
     }
@@ -286,7 +286,7 @@ getTree params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/trees/" ++ shaToString params.treeSha
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/trees/" ++ shaToString params.treeSha
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
@@ -300,7 +300,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 createTree :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     , treeNodes : List { path : String, content : String }
     , baseTree : Maybe ShaHash
@@ -315,7 +315,7 @@ createTree params =
     Http.task
         { method = "POST"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/trees"
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/trees"
         , body =
             ( "tree", Json.Encode.list encodeTreeNode params.treeNodes )
                 :: (case params.baseTree of
@@ -411,7 +411,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 listTags :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     }
     -> Task Http.Error (List Tag)
@@ -419,7 +419,7 @@ listTags params =
     Http.task
         { method = "GET"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/tags"
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/tags"
         , body = Http.emptyBody
         , resolver = jsonResolver (Json.Decode.list decodeTag)
         , timeout = Nothing
@@ -544,10 +544,10 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 createPullRequest :
     { authToken : AuthToken
-    , destinationOwner : String
+    , destinationOwner : Owner
     , destinationRepo : String
     , destinationBranch : String
-    , sourceBranchOwner : String
+    , sourceBranchOwner : Owner
     , sourceBranch : String
     , title : String
     , description : String
@@ -562,7 +562,7 @@ createPullRequest params =
     Http.task
         { method = "POST"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.destinationOwner ++ "/" ++ params.destinationRepo ++ "/pulls"
+        , url = "https://api.github.com/repos/" ++ ownerToString params.destinationOwner ++ "/" ++ params.destinationRepo ++ "/pulls"
         , body =
             Http.jsonBody
                 (Json.Encode.object
@@ -570,11 +570,11 @@ createPullRequest params =
                     , ( "base", Json.Encode.string params.destinationBranch )
                     , ( "head"
                       , Json.Encode.string
-                            (if params.sourceBranch == params.sourceBranchOwner then
+                            (if params.destinationOwner == params.sourceBranchOwner then
                                 params.sourceBranch
 
                              else
-                                params.sourceBranchOwner ++ ":" ++ params.sourceBranch
+                                ownerToString params.sourceBranchOwner ++ ":" ++ params.sourceBranch
                             )
                       )
                     , ( "body", Json.Encode.string params.description )
@@ -785,6 +785,20 @@ createComment params =
         }
 
 
+type Owner
+    = Owner String
+
+
+owner : String -> Owner
+owner =
+    Owner
+
+
+ownerToString : Owner -> String
+ownerToString (Owner owner_) =
+    owner_
+
+
 type AuthToken
     = AuthToken String
 
@@ -825,21 +839,21 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 createFork :
     { authToken : AuthToken
-    , owner : String
+    , owner : Owner
     , repo : String
     }
     ->
         Task
             Http.Error
-            { owner : String
+            { owner : Owner
             , repo : String
             }
 createFork params =
     let
         decoder =
             Json.Decode.map2
-                (\owner repo ->
-                    { owner = owner
+                (\owner_ repo ->
+                    { owner = owner owner_
                     , repo = repo
                     }
                 )
@@ -849,7 +863,7 @@ createFork params =
     Http.task
         { method = "POST"
         , headers = [ authorizationHeader params.authToken ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/forks"
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/forks"
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing

@@ -155,7 +155,20 @@ app =
 init : ( BackendModel, Cmd BackendMsg )
 init =
     ( { cachedPackages = Dict.empty, clients = Set.empty, updateIndex = 0 }
-    , getAllPackages packageCountOffset
+    , Task.perform
+        (\_ ->
+            [ ( "elm/core", Version.fromString "1.0.1" )
+            , ( "MartinSStewart/elm-serialize", Version.fromString "1.1.0" )
+            , ( "elm/elm-bytes", Version.fromString "1.0.8" )
+            , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
+            , ( "justgook/elm-image", Version.fromString "4.0.0" )
+            ]
+                |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
+                |> Ok
+                |> GotNewPackagePreviews
+        )
+        (Task.succeed ())
+      --, getAllPackages packageCountOffset
     )
 
 
@@ -348,7 +361,7 @@ nextTodo model =
         Just ( packageName, Fetched { elmJson, docs } ) ->
             (case String.split "/" packageName of
                 [ owner, repo ] ->
-                    reportErrors owner repo elmJson model
+                    reportErrors (Github.owner owner) repo elmJson model
 
                 _ ->
                     Task.succeed InvalidPackageName
@@ -365,7 +378,7 @@ nextTodo model =
             Cmd.none
 
 
-createPullRequest : Int -> String -> String -> String -> String -> Task Http.Error { url : String }
+createPullRequest : Int -> String -> Github.Owner -> String -> String -> Task Http.Error { url : String }
 createPullRequest changeCount elmJsonContent originalOwner originalRepo branchName =
     Github.createFork
         { authToken = Env.githubAuth, owner = originalOwner, repo = originalRepo }
@@ -469,8 +482,8 @@ Note that this pull request was made automatically (by @MartinSStewart). If you 
 Have a nice day!"""
 
 
-reportErrors : String -> String -> Elm.Project.PackageInfo -> BackendModel -> Task Never ReviewResult
-reportErrors repo owner elmJson model =
+reportErrors : Github.Owner -> String -> Elm.Project.PackageInfo -> BackendModel -> Task Never ReviewResult
+reportErrors owner repo elmJson model =
     Github.getRepository { authToken = Env.githubAuth, repo = repo, owner = owner }
         |> Task.andThen
             (\{ defaultBranch } ->
