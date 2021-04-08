@@ -154,7 +154,7 @@ view model =
 packagesView : FrontendModel -> Element msg
 packagesView model =
     Element.column
-        []
+        [ Element.spacing 8 ]
         (Dict.toList model.state
             |> List.concatMap
                 (\( packageName, versions ) ->
