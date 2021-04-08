@@ -47,7 +47,7 @@ decodeAllPackages =
                             Json.Decode.fail "Invalid author/name@version"
                 )
         )
-        |> Json.Decode.map List.reverse
+        |> Json.Decode.map (List.reverse >> List.take 500)
 
 
 getAllPackages : Int -> Cmd BackendMsg
@@ -553,7 +553,7 @@ reportErrors owner repo elmJson model =
                                                             Nothing ->
                                                                 CouldNotOpenTagZip
                                                     )
-                                                |> Task.onError (HttpError "getCommitZip" >> Task.succeed)
+                                                |> Task.onError (HttpError >> Task.succeed)
 
                                         ( _, True ) ->
                                             Task.succeed CouldNotOpenTagZip
@@ -562,7 +562,7 @@ reportErrors owner repo elmJson model =
                                     Task.succeed CouldNotOpenDefaultBranchZip
                         )
             )
-        |> Task.onError (HttpError "getInitialData" >> Task.succeed)
+        |> Task.onError (HttpError >> Task.succeed)
 
 
 project :

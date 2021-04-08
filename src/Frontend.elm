@@ -209,8 +209,8 @@ packageView packageName status =
                     RuleErrorsAndDefaultBranchAndTagMatch ruleResult ->
                         showRuleResult ruleResult
 
-                    HttpError message httpError ->
-                        Element.el [ errorColor ] (Element.text (message ++ ": " ++ httpErrorToString httpError))
+                    HttpError httpError ->
+                        Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
 
                     CouldNotOpenDefaultBranchZip ->
                         Element.el [ errorColor ] (Element.text "CouldNotOpenDefaultBranchZip")
