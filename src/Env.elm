@@ -6,12 +6,9 @@ module Env exposing (..)
 import Github
 
 
-dummyConfigItem =
-    ""
-
-
+githubAuth_ : String
 githubAuth_ =
-    "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"
+    ""
 
 
 githubAuth =

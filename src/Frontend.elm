@@ -193,50 +193,11 @@ packageView packageName status =
     , packageName
     , Element.column
         []
-        [ Element.row [ Element.spacing 8 ]
-            [ Element.text (packageName ++ " " ++ Elm.Version.toString (Types.packageVersion_ status))
-            , case status of
-                FetchedAndChecked_ { result } ->
-                    case result of
-                        NoErrors ->
-                            Element.el
-                                [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
-                                (Element.text "Passed")
-
-                        RuleErrorsFromDefaultBranch _ ->
-                            Element.el [ errorColor ] (Element.text "Found errors but the default branch doesn't match package tag ")
-
-                        RuleErrorsFromTag _ ->
-                            Element.el [ errorColor ] (Element.text "Found errors in package tag but failed to handle default branch")
-
-                        RuleErrorsAndDefaultBranchAndTagMatch _ ->
-                            Element.el [ errorColor ] (Element.text "Found errors")
-
-                        CouldNotOpenDefaultBranchZip ->
-                            Element.el [ errorColor ] (Element.text "Could not open branch zip")
-
-                        CouldNotOpenTagZip ->
-                            Element.el [ errorColor ] (Element.text "Could not open tag zip")
-
-                        PackageTagNotFound ->
-                            Element.el [ errorColor ] (Element.text "Package tag not found")
-
-                        HttpError _ _ ->
-                            Element.el [ errorColor ] (Element.text "Http error")
-
-                        InvalidPackageName ->
-                            Element.el [ errorColor ] (Element.text "Invalid package name")
-
-                Fetched_ _ ->
-                    Element.text "Fetched"
-
-                FetchingElmJsonAndDocsFailed_ _ _ error ->
-                    httpErrorToString error
-                        |> (++) "Http error: "
-                        |> Element.text
-                        |> Element.el [ errorColor ]
-            ]
+        [ Element.text (packageName ++ " " ++ Elm.Version.toString (Types.packageVersion_ status))
         , case status of
+            Fetched_ _ ->
+                Element.text "Fetched"
+
             FetchedAndChecked_ { result } ->
                 case result of
                     RuleErrorsFromDefaultBranch ruleResult ->
@@ -251,11 +212,20 @@ packageView packageName status =
                     HttpError message httpError ->
                         Element.el [ errorColor ] (Element.text (message ++ ": " ++ httpErrorToString httpError))
 
-                    _ ->
-                        Element.none
+                    CouldNotOpenDefaultBranchZip ->
+                        Element.el [ errorColor ] (Element.text "CouldNotOpenDefaultBranchZip")
 
-            _ ->
-                Element.none
+                    CouldNotOpenTagZip ->
+                        Element.el [ errorColor ] (Element.text "CouldNotOpenTagZip")
+
+                    PackageTagNotFound ->
+                        Element.el [ errorColor ] (Element.text "PackageTagNotFound")
+
+                    InvalidPackageName ->
+                        Element.el [ errorColor ] (Element.text "InvalidPackageName")
+
+            FetchingElmJsonAndDocsFailed_ version int error ->
+                Element.text "FetchingElmJsonAndDocsFailed" |> Element.el [ errorColor ]
         ]
     )
 
@@ -264,14 +234,20 @@ showRuleResult : RunRuleResult PullRequestStatus -> Element msg
 showRuleResult ruleResult =
     case ruleResult of
         RunRuleSuccessful errors _ pullRequestStatus ->
-            List.map
-                (\{ ruleName, message } ->
-                    Element.paragraph
-                        []
-                        [ Element.text <| ruleName ++ ": " ++ message ]
-                )
-                errors
-                |> Element.column [ errorColor ]
+            if List.isEmpty errors then
+                Element.el
+                    [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
+                    (Element.text "Passed")
+
+            else
+                List.map
+                    (\{ ruleName, message } ->
+                        Element.paragraph
+                            []
+                            [ Element.text <| ruleName ++ ": " ++ message ]
+                    )
+                    errors
+                    |> Element.column [ errorColor ]
 
         ParsingError ->
             Element.text "Parsing error"
