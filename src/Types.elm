@@ -140,12 +140,14 @@ type FrontendMsg
     | UrlChanged Url
     | ToggleOrder
     | PressedCreateFork
+    | PressedResetBackend
     | CreateForkResult (Result Http.Error { url : String })
     | NoOpFrontendMsg
 
 
 type ToBackend
     = NoOpToBackend
+    | ResetBackend
 
 
 type BackendMsg

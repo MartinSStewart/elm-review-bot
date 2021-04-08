@@ -81,6 +81,9 @@ update msg model =
               --    |> Task.attempt CreateForkResult
             )
 
+        PressedResetBackend ->
+            ( { model | state = Dict.empty }, Lamdera.sendToBackend ResetBackend )
+
         CreateForkResult result ->
             ( model, Cmd.none )
 
@@ -108,6 +111,14 @@ createPullRequestButton =
         buttonAttributes
         { onPress = Just PressedCreateFork
         , label = Element.text "Create pull request"
+        }
+
+
+resetBackendButton =
+    Element.Input.button
+        buttonAttributes
+        { onPress = Just PressedResetBackend
+        , label = Element.text "Reset backend"
         }
 
 
@@ -143,6 +154,7 @@ view model =
                                 }
                     , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
                     , createPullRequestButton
+                    , resetBackendButton
                     ]
                 , packagesView model
                 ]

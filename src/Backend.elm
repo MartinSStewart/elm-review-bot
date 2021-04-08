@@ -47,7 +47,7 @@ decodeAllPackages =
                             Json.Decode.fail "Invalid author/name@version"
                 )
         )
-        |> Json.Decode.map (List.reverse >> List.take 500)
+        |> Json.Decode.map (List.reverse >> List.take 100)
 
 
 getAllPackages : Int -> Cmd BackendMsg
@@ -842,3 +842,6 @@ updateFromFrontend _ _ msg model =
     case msg of
         NoOpToBackend ->
             ( model, Cmd.none )
+
+        ResetBackend ->
+            ( { model | cachedPackages = Dict.empty, updateIndex = 0 }, getAllPackages packageCountOffset )
