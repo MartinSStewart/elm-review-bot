@@ -221,7 +221,7 @@ packageView packageName status =
                         PackageTagNotFound ->
                             Element.el [ errorColor ] (Element.text "Package tag not found")
 
-                        HttpError _ ->
+                        HttpError _ _ ->
                             Element.el [ errorColor ] (Element.text "Http error")
 
                         InvalidPackageName ->
@@ -248,8 +248,8 @@ packageView packageName status =
                     RuleErrorsAndDefaultBranchAndTagMatch ruleResult ->
                         showRuleResult ruleResult
 
-                    HttpError httpError ->
-                        Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
+                    HttpError message httpError ->
+                        Element.el [ errorColor ] (Element.text (message ++ ": " ++ httpErrorToString httpError))
 
                     _ ->
                         Element.none

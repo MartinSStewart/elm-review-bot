@@ -169,7 +169,7 @@ type ReviewResult
     = CouldNotOpenDefaultBranchZip
     | CouldNotOpenTagZip
     | PackageTagNotFound
-    | HttpError Http.Error
+    | HttpError String Http.Error
     | InvalidPackageName
     | NoErrors
     | RuleErrorsFromDefaultBranch (RunRuleResult PullRequestStatus)

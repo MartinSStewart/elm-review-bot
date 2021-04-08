@@ -155,20 +155,20 @@ app =
 init : ( BackendModel, Cmd BackendMsg )
 init =
     ( { cachedPackages = Dict.empty, clients = Set.empty, updateIndex = 0 }
-    , Task.perform
-        (\_ ->
-            [ ( "elm/core", Version.fromString "1.0.1" )
-            , ( "MartinSStewart/elm-serialize", Version.fromString "1.1.0" )
-            , ( "elm/elm-bytes", Version.fromString "1.0.8" )
-            , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
-            , ( "justgook/elm-image", Version.fromString "4.0.0" )
-            ]
-                |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
-                |> Ok
-                |> GotNewPackagePreviews
-        )
-        (Task.succeed ())
-      --, getAllPackages packageCountOffset
+      --, Task.perform
+      --    (\_ ->
+      --        [ ( "elm/core", Version.fromString "1.0.1" )
+      --        , ( "MartinSStewart/elm-serialize", Version.fromString "1.1.0" )
+      --        , ( "elm/bytes", Version.fromString "1.0.8" )
+      --        , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
+      --        , ( "justgook/elm-image", Version.fromString "4.0.0" )
+      --        ]
+      --            |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
+      --            |> Ok
+      --            |> GotNewPackagePreviews
+      --    )
+      --    (Task.succeed ())
+    , getAllPackages packageCountOffset
     )
 
 
@@ -191,9 +191,15 @@ update msg model =
                                             Dict.update
                                                 packageName
                                                 (\maybeValue ->
-                                                    Pending version state.updateIndex
-                                                        :: Maybe.withDefault [] maybeValue
-                                                        |> Just
+                                                    let
+                                                        value =
+                                                            Maybe.withDefault [] maybeValue
+                                                    in
+                                                    if List.any (Types.packageVersion >> (==) version) value then
+                                                        maybeValue
+
+                                                    else
+                                                        Pending version state.updateIndex :: value |> Just
                                                 )
                                                 state.cachedPackages
                                         , updateIndex = state.updateIndex + 1
@@ -547,6 +553,7 @@ reportErrors owner repo elmJson model =
                                                             Nothing ->
                                                                 CouldNotOpenTagZip
                                                     )
+                                                |> Task.onError (HttpError "getCommitZip" >> Task.succeed)
 
                                         ( _, True ) ->
                                             Task.succeed CouldNotOpenTagZip
@@ -555,7 +562,7 @@ reportErrors owner repo elmJson model =
                                     Task.succeed CouldNotOpenDefaultBranchZip
                         )
             )
-        |> Task.onError (HttpError >> Task.succeed)
+        |> Task.onError (HttpError "getInitialData" >> Task.succeed)
 
 
 project :
