@@ -47,7 +47,7 @@ decodeAllPackages =
                             Json.Decode.fail "Invalid author/name@version"
                 )
         )
-        |> Json.Decode.map (List.reverse >> List.take 100)
+        |> Json.Decode.map List.reverse
 
 
 getAllPackages : Int -> Cmd BackendMsg
