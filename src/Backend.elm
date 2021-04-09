@@ -94,7 +94,7 @@ getPackageDocs packageName version =
                                 Err error ->
                                     Http.BadBody (Json.Decode.errorToString error) |> Err
                 )
-        , timeout = Nothing
+        , timeout = Just 30000
         }
 
 
@@ -134,7 +134,7 @@ getPackageElmJson packageName version =
                                 Err error ->
                                     Http.BadBody (Json.Decode.errorToString error) |> Err
                 )
-        , timeout = Nothing
+        , timeout = Just 30000
         }
 
 
