@@ -17,6 +17,7 @@ import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
 import Parser exposing (Parser)
+import Process
 import Review.Fix
 import Review.Project
 import Review.Project.Dependency
@@ -360,14 +361,16 @@ nextTodo model =
     in
     case maybeNextTodo of
         Just ( packageName, Pending version _ ) ->
-            getPackageElmJson packageName version
+            Process.sleep 200
+                |> Task.andThen (\_ -> getPackageElmJson packageName version)
                 |> Task.andThen (\elmJson -> getPackageDocs packageName version |> Task.map (Tuple.pair elmJson))
                 |> Task.attempt (FetchedElmJsonAndDocs { packageName = packageName, version = version })
 
         Just ( packageName, Fetched { elmJson, docs } ) ->
             (case String.split "/" packageName of
                 [ owner, repo ] ->
-                    reportErrors (Github.owner owner) repo elmJson model
+                    Process.sleep 200
+                        |> Task.andThen (\_ -> reportErrors (Github.owner owner) repo elmJson model)
 
                 _ ->
                     Task.succeed InvalidPackageName
