@@ -8,7 +8,7 @@ import Github
 
 githubAuth_ : String
 githubAuth_ =
-    ""
+    "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"
 
 
 githubAuth =
