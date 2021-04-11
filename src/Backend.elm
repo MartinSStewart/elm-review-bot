@@ -250,6 +250,28 @@ init =
       --            |> GotNewPackagePreviews
       --    )
       --    (Task.succeed ())
+      --, Task.perform
+      --    (\_ ->
+      --        [ ( "elm/core", Version.fromString "1.0.1" )
+      --        , ( "avh4/elm-color", Version.fromString "1.0.0" )
+      --        , ( "elm/browser", Version.fromString "1.0.0" )
+      --        , ( "elm/html", Version.fromString "1.0.0" )
+      --        , ( "elm/json", Version.fromString "1.0.0" )
+      --        , ( "elm/time", Version.fromString "1.0.0" )
+      --        , ( "rundis/elm-bootstrap", Version.fromString "5.2.0" )
+      --        , ( "elm-explorations/test", Version.fromString "1.2.2" )
+      --        ]
+      --            |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
+      --            |> Ok
+      --            |> GotNewPackagePreviews
+      --    )
+      --    (Task.succeed ())
+      --avh4/elm-color 1.0.0 <= v < 2.0.0
+      --elm/browser 1.0.0 <= v < 2.0.0
+      --elm/core 1.0.0 <= v < 2.0.0
+      --elm/html 1.0.0 <= v < 2.0.0
+      --elm/json 1.0.0 <= v < 2.0.0
+      --elm/time 1.0.0 <= v < 2.0.0
     , getAllPackages packageCountOffset
     )
 
@@ -937,3 +959,28 @@ updateFromFrontend sessionId clientId msg model =
 
             else
                 ( model, Cmd.none )
+
+        ResetRules ->
+            ( { model
+                | cachedPackages =
+                    Dict.map
+                        (List.map
+                            (\packageStatus ->
+                                case packageStatus of
+                                    Fetched data ->
+                                        Fetched data
+
+                                    Pending version updateIndex ->
+                                        Pending version updateIndex
+
+                                    FetchedAndChecked { updateIndex, docs, elmJson } ->
+                                        Fetched { updateIndex = updateIndex, docs = docs, elmJson = elmJson }
+
+                                    FetchingElmJsonAndDocsFailed version updateIndex error ->
+                                        Pending version updateIndex error
+                            )
+                        )
+                        model.cachedPackages
+              }
+            , getAllPackages packageCountOffset
+            )

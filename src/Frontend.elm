@@ -86,6 +86,9 @@ update msg model =
         PressedResetBackend ->
             ( { model | state = Dict.empty }, Lamdera.sendToBackend ResetBackend )
 
+        PressedResetRules ->
+            ( { model | state = Dict.empty }, Lamdera.sendToBackend ResetRules )
+
         CreateForkResult result ->
             ( model, Cmd.none )
 
@@ -148,6 +151,14 @@ resetBackendButton =
         }
 
 
+resetRuleButton =
+    Element.Input.button
+        buttonAttributes
+        { onPress = Just PressedResetRules
+        , label = Element.text "Reset rules"
+        }
+
+
 buttonAttributes =
     [ Element.Background.color <| Element.rgb 0.8 0.8 0.8
     , Element.padding 8
@@ -195,6 +206,7 @@ view model =
                             , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
                             , createPullRequestButton
                             , resetBackendButton
+                            , resetRuleButton
                             ]
                         , packagesView model
                         ]

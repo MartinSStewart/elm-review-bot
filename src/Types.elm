@@ -148,6 +148,7 @@ type FrontendMsg
     | ToggleOrder
     | PressedCreateFork
     | PressedResetBackend
+    | PressedResetRules
     | CreateForkResult (Result Http.Error { url : String })
     | NoOpFrontendMsg
     | PressedLogin
@@ -156,6 +157,7 @@ type FrontendMsg
 
 type ToBackend
     = ResetBackend
+    | ResetRules
     | LoginRequest String
 
 
