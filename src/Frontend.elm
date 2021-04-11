@@ -14,6 +14,7 @@ import Http
 import Lamdera
 import List.Extra as List
 import List.Nonempty
+import Review.Fix
 import Types exposing (..)
 import Url
 
@@ -245,7 +246,7 @@ packageView packageName status =
 showRuleResult : RunRuleResult PullRequestStatus -> Element msg
 showRuleResult ruleResult =
     case ruleResult of
-        RunRuleSuccessful errors _ pullRequestStatus ->
+        RunRuleSuccessful { errors, oldElmJson, newElmJson } pullRequestStatus ->
             if List.isEmpty errors then
                 Element.el
                     [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
@@ -259,19 +260,24 @@ showRuleResult ruleResult =
                             [ Element.text <| ruleName ++ ": " ++ message ]
                     )
                     errors
+                    ++ [ Element.text "Before:"
+                       , Element.text oldElmJson
+                       , Element.text "After:"
+                       , Element.text newElmJson
+                       ]
                     |> Element.column [ errorColor ]
 
         ParsingError ->
-            Element.text "Parsing error"
+            Element.paragraph [ errorColor ] [ Element.text "Parsing error" ]
 
         IncorrectProject ->
-            Element.text "Incorrect project"
+            Element.paragraph [ errorColor ] [ Element.text "Incorrect project" ]
 
         NotEnoughIterations ->
-            Element.text "Not enough iterations"
+            Element.paragraph [ errorColor ] [ Element.text "Not enough iterations" ]
 
         NotAnElm19xPackage ->
-            Element.text "Not an Elm 19.x package"
+            Element.paragraph [ errorColor ] [ Element.text "Not an Elm 19.x package" ]
 
         DependenciesDontExist nonempty ->
             List.Nonempty.toList nonempty
@@ -279,6 +285,21 @@ showRuleResult ruleResult =
                 |> String.join ", "
                 |> (++) "Missing dependencies: "
                 |> Element.text
+                |> List.singleton
+                |> Element.paragraph [ errorColor ]
+
+        FixFailed problem ->
+            Element.paragraph [ errorColor ]
+                [ case problem of
+                    Review.Fix.Unchanged ->
+                        Element.text "Tried to apply a fix that didn't change anything"
+
+                    Review.Fix.SourceCodeIsNotValid message ->
+                        "Source code not valid: " ++ message |> Element.text
+
+                    Review.Fix.HasCollisionsInFixRanges ->
+                        Element.text "HasCollisionsInFixRanges"
+                ]
 
 
 httpErrorToString error =

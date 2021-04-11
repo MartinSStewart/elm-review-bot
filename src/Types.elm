@@ -11,6 +11,7 @@ import Elm.Version exposing (Version)
 import Http
 import Lamdera exposing (ClientId, SessionId)
 import List.Nonempty exposing (Nonempty)
+import Review.Fix
 import Set exposing (Set)
 import Url exposing (Url)
 
@@ -187,17 +188,18 @@ type PullRequestStatus
 type RunRuleResult a
     = ParsingError
     | IncorrectProject
+    | FixFailed Review.Fix.Problem
     | NotEnoughIterations
-    | RunRuleSuccessful (List Error) String a
+    | RunRuleSuccessful { errors : List Error, oldElmJson : String, newElmJson : String } a
     | NotAnElm19xPackage
     | DependenciesDontExist (Nonempty Elm.Package.Name)
 
 
 mapRunRuleResult : (a -> b) -> RunRuleResult a -> RunRuleResult b
-mapRunRuleResult mapData result =
+mapRunRuleResult mapUserData result =
     case result of
-        RunRuleSuccessful errors newElmJson data ->
-            RunRuleSuccessful errors newElmJson (mapData data)
+        RunRuleSuccessful data userData ->
+            RunRuleSuccessful data (mapUserData userData)
 
         ParsingError ->
             ParsingError
@@ -213,6 +215,9 @@ mapRunRuleResult mapData result =
 
         DependenciesDontExist packageNames ->
             DependenciesDontExist packageNames
+
+        FixFailed problem ->
+            FixFailed problem
 
 
 type ToFrontend

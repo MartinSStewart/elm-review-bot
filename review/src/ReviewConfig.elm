@@ -31,4 +31,7 @@ config =
     , NoUnused.Parameters.rule
     , NoUnused.Variables.rule
     ]
-        |> List.map (Review.Rule.ignoreErrorsForDirectories [ "src/NoUnused", "src/Vendor", "src/Evergreen" ])
+        |> List.map
+            (Review.Rule.ignoreErrorsForDirectories [ "src/NoUnused", "src/Vendor", "src/Evergreen" ]
+                >> Review.Rule.ignoreErrorsForFiles [ "src/Github.elm" ]
+            )

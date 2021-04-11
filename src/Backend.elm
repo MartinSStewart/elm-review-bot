@@ -1,5 +1,6 @@
 module Backend exposing (..)
 
+import Bytes exposing (Bytes)
 import Dict exposing (Dict)
 import Elm.Constraint
 import Elm.Docs
@@ -27,6 +28,83 @@ import Task exposing (Task)
 import Types exposing (..)
 import Zip exposing (Zip)
 import Zip.Entry
+
+
+getPackageZip : PackageEndpoint -> Task Http.Error Bytes
+getPackageZip packageEndpoint =
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url = packageEndpoint.url
+        , body = Http.emptyBody
+        , resolver =
+            Http.bytesResolver
+                (\response ->
+                    case response of
+                        Http.BadUrl_ url ->
+                            Http.BadUrl url |> Err
+
+                        Http.Timeout_ ->
+                            Err Http.Timeout
+
+                        Http.NetworkError_ ->
+                            Err Http.NetworkError
+
+                        Http.BadStatus_ metadata _ ->
+                            Http.BadStatus metadata.statusCode |> Err
+
+                        Http.GoodStatus_ _ body ->
+                            Ok body
+                )
+        , timeout = Nothing
+        }
+
+
+decodePackageEndpoint : Decoder PackageEndpoint
+decodePackageEndpoint =
+    Json.Decode.map2 PackageEndpoint
+        (Json.Decode.field "url" Json.Decode.string)
+        (Json.Decode.field "hash" Json.Decode.string)
+
+
+getPackageEndpoint : String -> Version -> Task Http.Error PackageEndpoint
+getPackageEndpoint packageName version =
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url =
+            "https://package.elm-lang.org/packages/"
+                ++ packageName
+                ++ "/"
+                ++ Version.toString version
+                ++ "/endpoint.json"
+        , body = Http.emptyBody
+        , resolver =
+            Http.stringResolver
+                (\response ->
+                    case response of
+                        Http.BadUrl_ url ->
+                            Http.BadUrl url |> Err
+
+                        Http.Timeout_ ->
+                            Err Http.Timeout
+
+                        Http.NetworkError_ ->
+                            Err Http.NetworkError
+
+                        Http.BadStatus_ metadata _ ->
+                            Http.BadStatus metadata.statusCode |> Err
+
+                        Http.GoodStatus_ _ body ->
+                            case Json.Decode.decodeString decodePackageEndpoint body of
+                                Ok ok ->
+                                    Ok ok
+
+                                Err error ->
+                                    Http.BadBody (Json.Decode.errorToString error) |> Err
+                )
+        , timeout = Nothing
+        }
 
 
 decodeAllPackages : Decoder (List ( String, Version ))
@@ -156,20 +234,21 @@ app =
 init : ( BackendModel, Cmd BackendMsg )
 init =
     ( { cachedPackages = Dict.empty, clients = Set.empty, updateIndex = 0 }
-      --, Task.perform
-      --    (\_ ->
-      --        [ ( "elm/core", Version.fromString "1.0.1" )
-      --        , ( "MartinSStewart/elm-serialize", Version.fromString "1.1.0" )
-      --        , ( "elm/bytes", Version.fromString "1.0.8" )
-      --        , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
-      --        , ( "justgook/elm-image", Version.fromString "4.0.0" )
-      --        ]
-      --            |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
-      --            |> Ok
-      --            |> GotNewPackagePreviews
-      --    )
-      --    (Task.succeed ())
-    , getAllPackages packageCountOffset
+    , Task.perform
+        (\_ ->
+            [ ( "elm/core", Version.fromString "1.0.1" )
+            , ( "MartinSStewart/elm-serialize", Version.fromString "1.1.0" )
+            , ( "MartinSStewart/elm-box-packing", Version.fromString "3.0.0" )
+            , ( "elm/bytes", Version.fromString "1.0.8" )
+            , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
+            , ( "justgook/elm-image", Version.fromString "4.0.0" )
+            ]
+                |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
+                |> Ok
+                |> GotNewPackagePreviews
+        )
+        (Task.succeed ())
+      --, getAllPackages packageCountOffset
     )
 
 
@@ -511,22 +590,24 @@ reportErrors owner repo elmJson model =
                         , tagName = Version.toString elmJson.version
                         }
                     )
-                    (Github.getBranchZip
-                        { authToken = Env.githubAuth
-                        , branchName = defaultBranch
-                        , repo = repo
-                        , owner = owner
-                        }
+                    (getPackageEndpoint (Elm.Package.toString elmJson.name) elmJson.version
+                        |> Task.andThen getPackageZip
                     )
                     |> Task.andThen
                         (\( branchSha, tagSha, bytes ) ->
                             case Zip.fromBytes bytes of
                                 Just zip ->
-                                    case ( checkPackage elmJson model.cachedPackages zip, branchSha == tagSha ) of
-                                        ( RunRuleSuccessful errors elmJsonText (), True ) ->
-                                            RuleErrorsAndDefaultBranchAndTagMatch (RunRuleSuccessful errors elmJsonText PullRequestNotSent)
-                                                |> Task.succeed
+                                    let
+                                        result : RunRuleResult PullRequestStatus
+                                        result =
+                                            checkPackage elmJson model.cachedPackages zip
+                                                |> mapRunRuleResult (always PullRequestNotSent)
 
+                                        _ =
+                                            Debug.log (Elm.Package.toString elmJson.name) result
+                                    in
+                                    if branchSha == tagSha then
+                                        RuleErrorsAndDefaultBranchAndTagMatch result |> Task.succeed
                                         --createPullRequest
                                         --    (List.length errors)
                                         --    elmJsonText
@@ -534,32 +615,9 @@ reportErrors owner repo elmJson model =
                                         --    repo
                                         --    defaultBranch
                                         --    |> Task.map (\{ url } -> RuleErrorsAndPullRequest { errors = errors, pullRequestUrl = url })
-                                        ( RunRuleSuccessful result elmJsonText (), False ) ->
-                                            RuleErrorsFromDefaultBranch (RunRuleSuccessful result elmJsonText PullRequestNotSent)
-                                                |> Task.succeed
 
-                                        ( _, False ) ->
-                                            Github.getCommitZip
-                                                { authToken = Env.githubAuth
-                                                , repo = repo
-                                                , owner = owner
-                                                , sha = tagSha
-                                                }
-                                                |> Task.map
-                                                    (\bytes2 ->
-                                                        case Zip.fromBytes bytes2 of
-                                                            Just zip2 ->
-                                                                checkPackage elmJson model.cachedPackages zip2
-                                                                    |> mapRunRuleResult (always PullRequestNotSent)
-                                                                    |> RuleErrorsFromTag
-
-                                                            Nothing ->
-                                                                CouldNotOpenTagZip
-                                                    )
-                                                |> Task.onError (HttpError >> Task.succeed)
-
-                                        ( _, True ) ->
-                                            Task.succeed CouldNotOpenTagZip
+                                    else
+                                        RuleErrorsFromDefaultBranch result |> Task.succeed
 
                                 Nothing ->
                                     Task.succeed CouldNotOpenDefaultBranchZip
@@ -749,7 +807,13 @@ checkPackage elmJson cached zip =
             case Version.fromTuple ( 0, 19, 1 ) of
                 Just version ->
                     if Elm.Constraint.check version elmJson.elm then
-                        runRule 100 NoUnused.Dependencies.rule Nothing [] projectWithDependencies
+                        runRule
+                            10
+                            (Elm.Project.encode (Elm.Project.Package elmJson) |> Json.Encode.encode 4)
+                            NoUnused.Dependencies.rule
+                            Nothing
+                            []
+                            (Debug.log "projectWithDependencies" projectWithDependencies)
 
                     else
                         NotAnElm19xPackage
@@ -761,12 +825,13 @@ checkPackage elmJson cached zip =
 
 runRule :
     Int
+    -> String
     -> Review.Rule.Rule
     -> Maybe Review.Rule.ProjectData
     -> List Review.Rule.ReviewError
     -> Review.Project.Project
     -> RunRuleResult ()
-runRule stepsLeft rule projectData errors projectWithDependencies =
+runRule stepsLeft originalElmJson rule projectData errors projectWithDependencies =
     let
         result : { errors : List Review.Rule.ReviewError, rules : List Review.Rule.Rule, projectData : Maybe Review.Rule.ProjectData }
         result =
@@ -776,7 +841,7 @@ runRule stepsLeft rule projectData errors projectWithDependencies =
         elmJsonFixes =
             List.filterMap
                 (\error ->
-                    if Review.Rule.errorFilePath error == "elm.json" then
+                    if Review.Rule.errorFilePath error == "src/elm.json" then
                         case Review.Rule.errorFixes error of
                             Just fixes ->
                                 Just ( error, fixes )
@@ -801,33 +866,37 @@ runRule stepsLeft rule projectData errors projectWithDependencies =
     else
         case ( elmJsonFixes, Review.Project.elmJson projectWithDependencies ) of
             ( ( error, fixes ) :: _, Just elmJson ) ->
-                Review.Project.addElmJson
-                    { elmJson
-                        | raw =
-                            case Review.Fix.fix (Review.Rule.errorTarget error) fixes elmJson.raw of
-                                Review.Fix.Successful newRaw ->
-                                    newRaw
+                case Review.Fix.fix (Review.Rule.errorTarget error) (Debug.log "(fixes)" fixes) (Debug.log "raw" elmJson.raw) of
+                    Review.Fix.Successful newRaw ->
+                        case Json.Decode.decodeString Elm.Project.decoder newRaw of
+                            Ok elmJsonParsed ->
+                                Review.Project.addElmJson
+                                    { elmJson | raw = newRaw, project = elmJsonParsed }
+                                    projectWithDependencies
+                                    |> runRule (stepsLeft - 1) originalElmJson rule projectData (error :: errors)
 
-                                Review.Fix.Errored _ ->
-                                    elmJson.raw
-                    }
-                    projectWithDependencies
-                    |> runRule (stepsLeft - 1) rule projectData (error :: errors)
+                            Err _ ->
+                                FixFailed (Review.Fix.SourceCodeIsNotValid "elm.json is now an application")
+
+                    Review.Fix.Errored fixError ->
+                        FixFailed fixError
 
             ( [], Just elmJson ) ->
                 RunRuleSuccessful
-                    (List.map
-                        (\error ->
-                            { message = Review.Rule.errorMessage error
-                            , ruleName = Review.Rule.errorRuleName error
-                            , filePath = Review.Rule.errorFilePath error
-                            , details = Review.Rule.errorDetails error
-                            , range = Review.Rule.errorRange error
-                            }
-                        )
-                        errors
-                    )
-                    elmJson.raw
+                    { errors =
+                        List.map
+                            (\error ->
+                                { message = Review.Rule.errorMessage error
+                                , ruleName = Review.Rule.errorRuleName error
+                                , filePath = Review.Rule.errorFilePath error
+                                , details = Review.Rule.errorDetails error
+                                , range = Review.Rule.errorRange error
+                                }
+                            )
+                            errors
+                    , oldElmJson = originalElmJson
+                    , newElmJson = elmJson.raw
+                    }
                     ()
 
             _ ->
@@ -847,4 +916,4 @@ updateFromFrontend _ _ msg model =
             ( model, Cmd.none )
 
         ResetBackend ->
-            ( { model | cachedPackages = Dict.empty, updateIndex = 0 }, getAllPackages packageCountOffset )
+            init |> Tuple.mapFirst (\m -> { m | clients = model.clients })
