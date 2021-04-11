@@ -36,6 +36,7 @@ init _ key =
     ( { key = key
       , state = Dict.empty
       , order = RequestOrder
+      , loginStatus = NotLoggedIn ""
       }
     , Cmd.none
     )
@@ -88,6 +89,29 @@ update msg model =
         CreateForkResult result ->
             ( model, Cmd.none )
 
+        PressedLogin ->
+            ( model
+            , case model.loginStatus of
+                NotLoggedIn password ->
+                    LoginRequest password |> Lamdera.sendToBackend
+
+                LoggedIn ->
+                    Cmd.none
+            )
+
+        TypedPassword password ->
+            ( { model
+                | loginStatus =
+                    case model.loginStatus of
+                        NotLoggedIn _ ->
+                            NotLoggedIn password
+
+                        LoggedIn ->
+                            LoggedIn
+              }
+            , Cmd.none
+            )
+
 
 updateFromBackend : ToFrontend -> FrontendModel -> ( FrontendModel, Cmd FrontendMsg )
 updateFromBackend msg model =
@@ -102,6 +126,7 @@ updateFromBackend msg model =
                         model.state
                         dict
                         model.state
+                , loginStatus = LoggedIn
               }
             , Cmd.none
             )
@@ -134,31 +159,45 @@ view model =
     { title = "elm-review-bot"
     , body =
         [ Element.layout
-            []
-            (Element.column
-                [ Element.width Element.fill, Element.spacing 8, Element.padding 8 ]
-                [ Element.row
-                    [ Element.spacing 8 ]
-                    [ case model.order of
-                        RequestOrder ->
-                            Element.Input.button
-                                buttonAttributes
-                                { onPress = Just ToggleOrder
-                                , label = Element.text "Show alphabetical"
-                                }
+            [ Element.padding 16 ]
+            (case model.loginStatus of
+                NotLoggedIn password ->
+                    Element.column
+                        [ Element.spacing 8 ]
+                        [ Element.Input.text [ Element.width <| Element.px 300 ]
+                            { text = password
+                            , placeholder = Nothing
+                            , onChange = TypedPassword
+                            , label = Element.Input.labelAbove [] (Element.text "Enter password")
+                            }
+                        , Element.Input.button buttonAttributes { onPress = Just PressedLogin, label = Element.text "Login" }
+                        ]
 
-                        Alphabetical ->
-                            Element.Input.button
-                                buttonAttributes
-                                { onPress = Just ToggleOrder
-                                , label = Element.text "Show requested order"
-                                }
-                    , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
-                    , createPullRequestButton
-                    , resetBackendButton
-                    ]
-                , packagesView model
-                ]
+                LoggedIn ->
+                    Element.column
+                        [ Element.width Element.fill, Element.spacing 8, Element.padding 8 ]
+                        [ Element.row
+                            [ Element.spacing 8 ]
+                            [ case model.order of
+                                RequestOrder ->
+                                    Element.Input.button
+                                        buttonAttributes
+                                        { onPress = Just ToggleOrder
+                                        , label = Element.text "Show alphabetical"
+                                        }
+
+                                Alphabetical ->
+                                    Element.Input.button
+                                        buttonAttributes
+                                        { onPress = Just ToggleOrder
+                                        , label = Element.text "Show requested order"
+                                        }
+                            , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
+                            , createPullRequestButton
+                            , resetBackendButton
+                            ]
+                        , packagesView model
+                        ]
             )
         ]
     }

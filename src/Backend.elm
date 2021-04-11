@@ -383,15 +383,24 @@ update msg model =
                 )
             )
 
-        ClientConnected _ clientId ->
-            ( { model | clients = Set.insert clientId model.clients }
-            , Dict.map (\_ value -> List.filterMap statusToStatusFrontend value) model.cachedPackages
-                |> Updates
-                |> Lamdera.sendToFrontend clientId
+        ClientConnected sessionId clientId ->
+            ( model
+            , if Set.member sessionId model.clients then
+                sendUpdates clientId model
+
+              else
+                Cmd.none
             )
 
         ClientDisconnected _ clientId ->
             ( { model | clients = Set.remove clientId model.clients }, Cmd.none )
+
+
+sendUpdates : ClientId -> { a | cachedPackages : Dict String (List PackageStatus) } -> Cmd backendMsg
+sendUpdates clientId model =
+    Dict.map (\_ value -> List.filterMap statusToStatusFrontend value) model.cachedPackages
+        |> Updates
+        |> Lamdera.sendToFrontend clientId
 
 
 nextTodo : BackendModel -> Cmd BackendMsg
@@ -648,29 +657,23 @@ project elmJson srcModules testModules =
         srcModules_ : Dict String { path : String, source : String, imports : List String }
         srcModules_ =
             srcModules
-                |> List.filterMap
+                |> List.map
                     (\{ path, source } ->
-                        case String.split "/" path |> List.reverse |> List.head of
-                            Just moduleName ->
-                                Just
-                                    ( String.dropRight (String.length ".elm") moduleName
-                                    , { path = path
-                                      , source = source
-                                      , imports =
-                                            String.filter ((/=) '\u{000D}') source
-                                                |> String.indexes importText
-                                                |> List.filterMap
-                                                    (\index ->
-                                                        String.slice (index + String.length importText) (index + 200) source
-                                                            |> String.trim
-                                                            |> Parser.run importParser
-                                                            |> Result.toMaybe
-                                                    )
-                                      }
-                                    )
-
-                            Nothing ->
-                                Nothing
+                        ( String.split "/" path |> List.drop 1 |> String.join "." |> String.dropRight (String.length ".elm")
+                        , { path = path
+                          , source = source
+                          , imports =
+                                String.filter ((/=) '\u{000D}') source
+                                    |> String.indexes importText
+                                    |> List.filterMap
+                                        (\index ->
+                                            String.slice (index + String.length importText) (index + 200) source
+                                                |> String.trim
+                                                |> Parser.run importParser
+                                                |> Result.toMaybe
+                                        )
+                          }
+                        )
                     )
                 |> Dict.fromList
 
@@ -917,10 +920,20 @@ runRule stepsLeft originalElmJson rule projectData errors projectWithDependencie
 
 
 updateFromFrontend : SessionId -> ClientId -> ToBackend -> BackendModel -> ( BackendModel, Cmd BackendMsg )
-updateFromFrontend _ _ msg model =
+updateFromFrontend sessionId clientId msg model =
     case msg of
-        NoOpToBackend ->
-            ( model, Cmd.none )
-
         ResetBackend ->
             init |> Tuple.mapFirst (\m -> { m | clients = model.clients })
+
+        LoginRequest password ->
+            if password == Env.adminPassword then
+                ( { model | clients = Set.insert sessionId model.clients }
+                , if Set.member password model.clients then
+                    Cmd.none
+
+                  else
+                    sendUpdates clientId model
+                )
+
+            else
+                ( model, Cmd.none )

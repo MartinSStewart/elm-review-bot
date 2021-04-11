@@ -13,3 +13,8 @@ githubAuth_ =
 
 githubAuth =
     Github.authToken githubAuth_
+
+
+adminPassword : String
+adminPassword =
+    "123"

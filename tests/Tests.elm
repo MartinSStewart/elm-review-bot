@@ -16,15 +16,15 @@ suite =
             \_ ->
                 Backend.project
                     package
-                    [ { path = "src/A.elm", source = """module A exposing (..)
+                    [ { path = "src/Q/A.elm", source = """module Q.A exposing (..)
                     
-import C
+import Q.C
 
 a = 0""" }
-                    , { path = "src/B.elm", source = """module B exposing (..)
+                    , { path = "src/Q/B.elm", source = """module Q.B exposing (..)
 
 a = 0""" }
-                    , { path = "src/C.elm", source = """module C exposing (..)
+                    , { path = "src/Q/C.elm", source = """module Q.C exposing (..)
 
 import
     A.D exposing (..)
@@ -33,7 +33,7 @@ a = 0""" }
                     , { path = "src/D.elm", source = """module D exposing (..)
 
 a = 0""" }
-                    , { path = "src/A.D.elm", source = """module A.D exposing (..)
+                    , { path = "src/A/D.elm", source = """module A.D exposing (..)
 
 a = 0""" }
                     ]
@@ -45,14 +45,14 @@ a = 0""" }
             \_ ->
                 Backend.project
                     package
-                    [ { path = "src/A.elm", source = """module A exposing (..)
+                    [ { path = "src/Q/A.elm", source = """module Q.A exposing (..)
 
 a = 0""" }
-                    , { path = "src/B.elm", source = """module B exposing (..)
+                    , { path = "src/Q/B.elm", source = """module Q.B exposing (..)
 
 a = 0""" }
                     ]
-                    [ { path = "tests/C.elm", source = """module C exposing (..)
+                    [ { path = "tests/Q/C.elm", source = """module Q.C exposing (..)
  
 a = 0""" }
                     , { path = "tests/D.elm", source = """module D exposing (..)
@@ -74,8 +74,8 @@ package =
     "license": "BSD-3-Clause",
     "version": "1.0.0",
     "exposed-modules": [
-        "A",
-        "B"
+        "Q.A",
+        "Q.B"
     ],
     "elm-version": "0.19.0 <= v < 0.20.0",
     "dependencies": {

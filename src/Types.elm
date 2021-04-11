@@ -20,7 +20,13 @@ type alias FrontendModel =
     { state : Dict String (List PackageStatusFrontend)
     , key : Key
     , order : DisplayOrder
+    , loginStatus : LoginStatus
     }
+
+
+type LoginStatus
+    = NotLoggedIn String
+    | LoggedIn
 
 
 type alias Error =
@@ -144,11 +150,13 @@ type FrontendMsg
     | PressedResetBackend
     | CreateForkResult (Result Http.Error { url : String })
     | NoOpFrontendMsg
+    | PressedLogin
+    | TypedPassword String
 
 
 type ToBackend
-    = NoOpToBackend
-    | ResetBackend
+    = ResetBackend
+    | LoginRequest String
 
 
 type BackendMsg
