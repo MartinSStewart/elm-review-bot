@@ -234,23 +234,23 @@ app =
 init : ( BackendModel, Cmd BackendMsg )
 init =
     ( { cachedPackages = Dict.empty, clients = Set.empty, updateIndex = 0 }
-    , Task.perform
-        (\_ ->
-            [ ( "elm/core", Version.fromString "1.0.1" )
-            , ( "MartinSStewart/elm-serialize", Version.fromString "1.1.0" )
-            , ( "MartinSStewart/elm-box-packing", Version.fromString "3.0.0" )
-            , ( "elm/bytes", Version.fromString "1.0.8" )
-            , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
-            , ( "justgook/elm-image", Version.fromString "4.0.0" )
-            , ( "elm/random", Version.fromString "1.0.0" )
-            , ( "elm-explorations/test", Version.fromString "1.2.2" )
-            ]
-                |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
-                |> Ok
-                |> GotNewPackagePreviews
-        )
-        (Task.succeed ())
-      --, getAllPackages packageCountOffset
+      --, Task.perform
+      --    (\_ ->
+      --        [ ( "elm/core", Version.fromString "1.0.1" )
+      --        , ( "MartinSStewart/elm-serialize", Version.fromString "1.1.0" )
+      --        , ( "MartinSStewart/elm-box-packing", Version.fromString "3.0.0" )
+      --        , ( "elm/bytes", Version.fromString "1.0.8" )
+      --        , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
+      --        , ( "justgook/elm-image", Version.fromString "4.0.0" )
+      --        , ( "elm/random", Version.fromString "1.0.0" )
+      --        , ( "elm-explorations/test", Version.fromString "1.2.2" )
+      --        ]
+      --            |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
+      --            |> Ok
+      --            |> GotNewPackagePreviews
+      --    )
+      --    (Task.succeed ())
+    , getAllPackages packageCountOffset
     )
 
 
