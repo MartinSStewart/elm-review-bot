@@ -17,7 +17,7 @@ import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
-import Parser exposing (Parser)
+import Parser exposing ((|.), (|=), Parser)
 import Process
 import Review.Fix
 import Review.Project
@@ -242,6 +242,8 @@ init =
             , ( "elm/bytes", Version.fromString "1.0.8" )
             , ( "ianmackenzie/elm-units", Version.fromString "2.4.0" )
             , ( "justgook/elm-image", Version.fromString "4.0.0" )
+            , ( "elm/random", Version.fromString "1.0.0" )
+            , ( "elm-explorations/test", Version.fromString "1.2.2" )
             ]
                 |> List.filterMap (\( a, b ) -> Maybe.map (Tuple.pair a) b)
                 |> Ok
@@ -602,9 +604,6 @@ reportErrors owner repo elmJson model =
                                         result =
                                             checkPackage elmJson model.cachedPackages zip
                                                 |> mapRunRuleResult (always PullRequestNotSent)
-
-                                        _ =
-                                            Debug.log (Elm.Package.toString elmJson.name) result
                                     in
                                     if branchSha == tagSha then
                                         RuleErrorsAndDefaultBranchAndTagMatch result |> Task.succeed
@@ -633,36 +632,45 @@ project :
     -> Review.Project.Project
 project elmJson srcModules testModules =
     let
+        isWhitespace : Char -> Bool
+        isWhitespace c =
+            c == ' ' || c == '\t' || c == '\n'
+
         importParser : Parser String
         importParser =
-            Parser.chompWhile (\c -> c /= ' ' && c /= '\t' && c /= '\n') |> Parser.getChompedString
+            Parser.succeed identity
+                |. Parser.chompWhile isWhitespace
+                |= (Parser.chompWhile (isWhitespace >> not) |> Parser.getChompedString)
+
+        importText =
+            "\nimport"
 
         srcModules_ : Dict String { path : String, source : String, imports : List String }
         srcModules_ =
             srcModules
-                |> List.map
+                |> List.filterMap
                     (\{ path, source } ->
-                        let
-                            moduleName =
-                                String.dropLeft (String.length "src/") path
-                                    |> String.dropRight (String.length ".elm")
-                                    |> String.replace "/" "."
-                        in
-                        ( moduleName
-                        , { path = path
-                          , source = source
-                          , imports =
-                                String.filter ((/=) '\u{000D}') source
-                                    |> String.indexes "\nimport"
-                                    |> List.filterMap
-                                        (\index ->
-                                            String.slice (index + 7) 200 source
-                                                |> String.trim
-                                                |> Parser.run importParser
-                                                |> Result.toMaybe
-                                        )
-                          }
-                        )
+                        case String.split "/" path |> List.reverse |> List.head of
+                            Just moduleName ->
+                                Just
+                                    ( String.dropRight (String.length ".elm") moduleName
+                                    , { path = path
+                                      , source = source
+                                      , imports =
+                                            String.filter ((/=) '\u{000D}') source
+                                                |> String.indexes importText
+                                                |> List.filterMap
+                                                    (\index ->
+                                                        String.slice (index + String.length importText) (index + 200) source
+                                                            |> String.trim
+                                                            |> Parser.run importParser
+                                                            |> Result.toMaybe
+                                                    )
+                                      }
+                                    )
+
+                            Nothing ->
+                                Nothing
                     )
                 |> Dict.fromList
 
@@ -731,17 +739,17 @@ checkPackage elmJson cached zip =
 
                     else
                         case
-                            ( String.split "/" (Zip.Entry.path zipEntry) |> List.Nonempty.fromList
+                            ( String.split "/" (Zip.Entry.path zipEntry) |> List.drop 1 |> List.Nonempty.fromList
                             , Zip.Entry.toString zipEntry
                             )
                         of
                             ( Just nonemptyPath, Ok source ) ->
                                 if
                                     String.endsWith ".elm" (List.Nonempty.last nonemptyPath)
-                                        && (List.Nonempty.get 1 nonemptyPath == folderName)
+                                        && (List.Nonempty.get 0 nonemptyPath == folderName)
                                 then
                                     Just
-                                        { path = Zip.Entry.path zipEntry
+                                        { path = String.join "/" (List.Nonempty.toList nonemptyPath)
                                         , source = source
                                         }
 
@@ -797,7 +805,12 @@ checkPackage elmJson cached zip =
                             ( state, packageName :: missingPackages_ )
                 )
                 ( project elmJson (modules "src") (modules "tests"), [] )
-                elmJson.deps
+                (elmJson.deps ++ elmJson.testDeps)
+
+        addDependency : Elm.Project.PackageInfo -> List Elm.Docs.Module -> Review.Project.Project -> Review.Project.Project
+        addDependency elmJson_ docs =
+            Review.Project.addDependency
+                (Review.Project.Dependency.create (Elm.Package.toString elmJson_.name) (Elm.Project.Package elmJson_) docs)
     in
     case List.Nonempty.fromList missingPackages of
         Just missingPackages_ ->
@@ -813,7 +826,7 @@ checkPackage elmJson cached zip =
                             NoUnused.Dependencies.rule
                             Nothing
                             []
-                            (Debug.log "projectWithDependencies" projectWithDependencies)
+                            projectWithDependencies
 
                     else
                         NotAnElm19xPackage
@@ -866,7 +879,7 @@ runRule stepsLeft originalElmJson rule projectData errors projectWithDependencie
     else
         case ( elmJsonFixes, Review.Project.elmJson projectWithDependencies ) of
             ( ( error, fixes ) :: _, Just elmJson ) ->
-                case Review.Fix.fix (Review.Rule.errorTarget error) (Debug.log "(fixes)" fixes) (Debug.log "raw" elmJson.raw) of
+                case Review.Fix.fix (Review.Rule.errorTarget error) fixes elmJson.raw of
                     Review.Fix.Successful newRaw ->
                         case Json.Decode.decodeString Elm.Project.decoder newRaw of
                             Ok elmJsonParsed ->
@@ -901,12 +914,6 @@ runRule stepsLeft originalElmJson rule projectData errors projectWithDependencie
 
             _ ->
                 IncorrectProject
-
-
-addDependency : Elm.Project.PackageInfo -> List Elm.Docs.Module -> Review.Project.Project -> Review.Project.Project
-addDependency elmJson docs =
-    Review.Project.addDependency
-        (Review.Project.Dependency.create (Elm.Package.toString elmJson.name) (Elm.Project.Package elmJson) docs)
 
 
 updateFromFrontend : SessionId -> ClientId -> ToBackend -> BackendModel -> ( BackendModel, Cmd BackendMsg )
