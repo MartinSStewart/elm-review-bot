@@ -964,21 +964,23 @@ updateFromFrontend sessionId clientId msg model =
             ( { model
                 | cachedPackages =
                     Dict.map
-                        (List.map
-                            (\packageStatus ->
-                                case packageStatus of
-                                    Fetched data ->
-                                        Fetched data
+                        (\_ versions ->
+                            List.map
+                                (\packageStatus ->
+                                    case packageStatus of
+                                        Fetched data ->
+                                            Fetched data
 
-                                    Pending version updateIndex ->
-                                        Pending version updateIndex
+                                        Pending version updateIndex ->
+                                            Pending version updateIndex
 
-                                    FetchedAndChecked { updateIndex, docs, elmJson } ->
-                                        Fetched { updateIndex = updateIndex, docs = docs, elmJson = elmJson }
+                                        FetchedAndChecked { updateIndex, docs, elmJson } ->
+                                            Fetched { updateIndex = updateIndex, docs = docs, elmJson = elmJson }
 
-                                    FetchingElmJsonAndDocsFailed version updateIndex error ->
-                                        Pending version updateIndex error
-                            )
+                                        FetchingElmJsonAndDocsFailed version updateIndex _ ->
+                                            Pending version updateIndex
+                                )
+                                versions
                         )
                         model.cachedPackages
               }

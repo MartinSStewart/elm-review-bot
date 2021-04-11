@@ -87,7 +87,29 @@ update msg model =
             ( { model | state = Dict.empty }, Lamdera.sendToBackend ResetBackend )
 
         PressedResetRules ->
-            ( { model | state = Dict.empty }, Lamdera.sendToBackend ResetRules )
+            ( { model
+                | state =
+                    Dict.map
+                        (\_ versions ->
+                            List.filterMap
+                                (\packageStatus ->
+                                    case packageStatus of
+                                        Fetched_ data ->
+                                            Fetched_ data |> Just
+
+                                        FetchedAndChecked_ { version, updateIndex } ->
+                                            Fetched_ { version = version, updateIndex = updateIndex }
+                                                |> Just
+
+                                        FetchingElmJsonAndDocsFailed_ version updateIndex _ ->
+                                            Nothing
+                                )
+                                versions
+                        )
+                        model.state
+              }
+            , Lamdera.sendToBackend ResetRules
+            )
 
         CreateForkResult result ->
             ( model, Cmd.none )
