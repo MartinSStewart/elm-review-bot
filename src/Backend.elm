@@ -1,5 +1,6 @@
 module Backend exposing (..)
 
+import AssocList
 import Bytes exposing (Bytes)
 import Dict exposing (Dict)
 import Elm.Constraint
@@ -297,13 +298,17 @@ update msg model =
                                                 (\maybeValue ->
                                                     let
                                                         value =
-                                                            Maybe.withDefault [] maybeValue
+                                                            Maybe.withDefault AssocList.empty maybeValue
                                                     in
-                                                    if List.any (Types.packageVersion >> (==) version) value then
+                                                    if AssocList.member version value then
                                                         maybeValue
 
                                                     else
-                                                        Pending version state.updateIndex :: value |> Just
+                                                        AssocList.insert
+                                                            version
+                                                            (Pending version state.updateIndex)
+                                                            value
+                                                            |> Just
                                                 )
                                                 state.cachedPackages
                                         , updateIndex = state.updateIndex + 1
@@ -344,7 +349,7 @@ update msg model =
                         | cachedPackages =
                             Dict.update
                                 packageName
-                                (Maybe.map (List.setIf (Types.packageVersion >> (==) version) packageStatus))
+                                (Maybe.map (AssocList.insert version packageStatus))
                                 model.cachedPackages
                         , updateIndex = model.updateIndex + 1
                     }
@@ -382,7 +387,7 @@ update msg model =
                         | cachedPackages =
                             Dict.update
                                 packageName
-                                (Maybe.map (List.setIf (Types.packageVersion >> (==) elmJson.version) packageStatus))
+                                (Maybe.map (AssocList.insert elmJson.version packageStatus))
                                 model.cachedPackages
                         , updateIndex = model.updateIndex + 1
                     }
@@ -418,9 +423,9 @@ update msg model =
             ( { model | clients = Set.remove clientId model.clients }, Cmd.none )
 
 
-sendUpdates : ClientId -> { a | cachedPackages : Dict String (List PackageStatus) } -> Cmd backendMsg
+sendUpdates : ClientId -> BackendModel -> Cmd backendMsg
 sendUpdates clientId model =
-    Dict.map (\_ value -> List.filterMap statusToStatusFrontend value) model.cachedPackages
+    Dict.map (\_ value -> AssocList.values value |> List.filterMap statusToStatusFrontend) model.cachedPackages
         |> Updates
         |> Lamdera.sendToFrontend clientId
 
@@ -451,7 +456,7 @@ nextTodo model =
                                                 if
                                                     List.count
                                                         (Types.packageVersion >> Version.compare elmJson.version >> (/=) GT)
-                                                        versions
+                                                        (AssocList.values versions)
                                                         == 1
                                                 then
                                                     Just ( packageName, packageStatus )
@@ -466,7 +471,7 @@ nextTodo model =
                                     currentTodo_
                         )
                         currentTodo
-                        versions
+                        (AssocList.values versions)
                 )
                 Nothing
                 model.cachedPackages
@@ -752,7 +757,7 @@ project elmJson srcModules testModules =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (List PackageStatus) -> Zip -> RunRuleResult ()
+checkPackage : Elm.Project.PackageInfo -> Dict String (AssocList.Dict Version PackageStatus) -> Zip -> RunRuleResult ()
 checkPackage elmJson cached zip =
     let
         modules : String -> List { path : String, source : String }
@@ -817,7 +822,7 @@ checkPackage elmJson cached zip =
                                         else
                                             Nothing
                                     )
-                                    packages
+                                    (AssocList.values packages)
                                     |> List.maximumWith (\( a, _ ) ( b, _ ) -> Version.compare a b)
                             of
                                 Just ( _, ( elmJson_, docs_ ) ) ->
@@ -965,8 +970,8 @@ updateFromFrontend sessionId clientId msg model =
                 | cachedPackages =
                     Dict.map
                         (\_ versions ->
-                            List.map
-                                (\packageStatus ->
+                            AssocList.map
+                                (\_ packageStatus ->
                                     case packageStatus of
                                         Fetched data ->
                                             Fetched data

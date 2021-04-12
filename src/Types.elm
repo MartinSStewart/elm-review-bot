@@ -1,5 +1,6 @@
 module Types exposing (..)
 
+import AssocList
 import Browser exposing (UrlRequest)
 import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
@@ -136,7 +137,7 @@ updateIndex packageStatus =
 
 
 type alias BackendModel =
-    { cachedPackages : Dict String (List PackageStatus)
+    { cachedPackages : Dict String (AssocList.Dict Version PackageStatus)
     , clients : Set String
     , updateIndex : Int
     }
