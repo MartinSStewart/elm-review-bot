@@ -412,11 +412,10 @@ update msg model =
 
         ClientConnected sessionId clientId ->
             ( model
-            , if Set.member sessionId model.clients then
-                sendUpdates clientId model
-
-              else
-                Cmd.none
+            , --if Set.member sessionId model.clients then
+              sendUpdates clientId model
+              --else
+              --Cmd.none
             )
 
         ClientDisconnected _ clientId ->
