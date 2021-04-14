@@ -60,6 +60,17 @@ type PackageStatus
     | FetchingElmJsonAndDocsFailed Version Int Http.Error
 
 
+removeComments : Elm.Docs.Module -> Elm.Docs.Module
+removeComments docs =
+    { name = docs.name
+    , comment = ""
+    , unions = List.map (\union -> { union | comment = "" }) docs.unions
+    , aliases = List.map (\alias -> { alias | comment = "" }) docs.aliases
+    , values = List.map (\value -> { value | comment = "" }) docs.values
+    , binops = List.map (\binop -> { binop | comment = "" }) docs.binops
+    }
+
+
 type PackageStatusFrontend
     = Fetched_
         { version : Version
@@ -181,7 +192,6 @@ type BackendMsg
 
 type ReviewResult
     = CouldNotOpenDefaultBranchZip
-    | CouldNotOpenTagZip
     | PackageTagNotFound
     | HttpError Http.Error
     | InvalidPackageName

@@ -307,9 +307,6 @@ packageView packageName status =
                     CouldNotOpenDefaultBranchZip ->
                         Element.el [ errorColor ] (Element.text "CouldNotOpenDefaultBranchZip")
 
-                    CouldNotOpenTagZip ->
-                        Element.el [ errorColor ] (Element.text "CouldNotOpenTagZip")
-
                     PackageTagNotFound ->
                         Element.el [ errorColor ] (Element.text "PackageTagNotFound")
 

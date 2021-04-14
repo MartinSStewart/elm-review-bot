@@ -480,7 +480,10 @@ nextTodo model =
         Just ( packageName, Pending version _ ) ->
             Process.sleep 200
                 |> Task.andThen (\_ -> getPackageElmJson packageName version)
-                |> Task.andThen (\elmJson -> getPackageDocs packageName version |> Task.map (Tuple.pair elmJson))
+                |> Task.andThen
+                    (\elmJson ->
+                        getPackageDocs packageName version |> Task.map (List.map removeComments >> Tuple.pair elmJson)
+                    )
                 |> Task.attempt (FetchedElmJsonAndDocs { packageName = packageName, version = version })
 
         Just ( packageName, Fetched { elmJson, docs } ) ->
