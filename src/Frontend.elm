@@ -287,10 +287,16 @@ packageView packageName status =
             FetchedAndChecked_ { result } ->
                 case result of
                     RuleErrorsFromDefaultBranch ruleResult ->
-                        showRuleResult ruleResult
+                        Element.column []
+                            [ Element.el [ errorColor ] <| Element.text "RuleErrorsFromDefaultBranch"
+                            , showRuleResult ruleResult
+                            ]
 
                     RuleErrorsFromTag ruleResult ->
-                        showRuleResult ruleResult
+                        Element.column []
+                            [ Element.el [ errorColor ] <| Element.text "RuleErrorsFromTag"
+                            , showRuleResult ruleResult
+                            ]
 
                     RuleErrorsAndDefaultBranchAndTagMatch ruleResult ->
                         showRuleResult ruleResult
