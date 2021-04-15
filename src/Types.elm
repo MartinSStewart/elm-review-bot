@@ -195,7 +195,6 @@ type ReviewResult
     | PackageTagNotFound
     | HttpError Http.Error
     | InvalidPackageName
-    | RuleErrorsFromDefaultBranch (RunRuleResult PullRequestStatus)
     | RuleErrorsFromTag (RunRuleResult PullRequestStatus)
     | RuleErrorsAndDefaultBranchAndTagMatch (RunRuleResult PullRequestStatus)
 

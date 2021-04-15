@@ -654,7 +654,7 @@ reportErrors owner repo elmJson model =
                                         --    |> Task.map (\{ url } -> RuleErrorsAndPullRequest { errors = errors, pullRequestUrl = url })
 
                                     else
-                                        RuleErrorsFromDefaultBranch result |> Task.succeed
+                                        RuleErrorsFromTag result |> Task.succeed
 
                                 Nothing ->
                                     Task.succeed CouldNotOpenDefaultBranchZip
