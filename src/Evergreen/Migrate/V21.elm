@@ -7,29 +7,29 @@ import Lamdera.Migrations exposing (..)
 
 frontendModel : Old.FrontendModel -> ModelMigration New.FrontendModel New.FrontendMsg
 frontendModel old =
-    Unimplemented
+    ModelUnchanged
 
 
 backendModel : Old.BackendModel -> ModelMigration New.BackendModel New.BackendMsg
 backendModel old =
-    Unimplemented
+    ModelUnchanged
 
 
 frontendMsg : Old.FrontendMsg -> MsgMigration New.FrontendMsg New.FrontendMsg
 frontendMsg old =
-    Unimplemented
+    MsgUnchanged
 
 
 toBackend : Old.ToBackend -> MsgMigration New.ToBackend New.BackendMsg
 toBackend old =
-    Unimplemented
+    MsgUnchanged
 
 
 backendMsg : Old.BackendMsg -> MsgMigration New.BackendMsg New.BackendMsg
 backendMsg old =
-    Unimplemented
+    MsgUnchanged
 
 
 toFrontend : Old.ToFrontend -> MsgMigration New.ToFrontend New.FrontendMsg
 toFrontend old =
-    Unimplemented
+    MsgUnchanged
