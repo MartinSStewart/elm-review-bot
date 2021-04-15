@@ -14,8 +14,9 @@ import Http
 import Lamdera
 import List.Extra as List
 import List.Nonempty
+import PackageStatus exposing (ReviewResult(..), RunRuleResult(..))
 import Review.Fix
-import Types exposing (..)
+import Types exposing (DisplayOrder(..), FrontendModel, FrontendMsg(..), LoginStatus(..), PackageStatusFrontend(..), ToBackend(..), ToFrontend(..))
 import Url
 
 
@@ -76,13 +77,6 @@ update msg model =
             , Cmd.none
             )
 
-        PressedCreateFork ->
-            ( model
-            , Cmd.none
-              --, Backend.createPullRequest 1 "test" "MartinSStewart" "elm-serialize" "master"
-              --    |> Task.attempt CreateForkResult
-            )
-
         PressedResetBackend ->
             ( { model | state = Dict.empty }, Lamdera.sendToBackend ResetBackend )
 
@@ -101,7 +95,16 @@ update msg model =
                                             Fetched_ { version = version, updateIndex = updateIndex }
                                                 |> Just
 
-                                        FetchingElmJsonAndDocsFailed_ version updateIndex _ ->
+                                        FetchingElmJsonAndDocsFailed_ _ _ _ ->
+                                            Nothing
+
+                                        FetchedCheckedAndPullRequestPending_ _ ->
+                                            Nothing
+
+                                        FetchedCheckedAndPullRequestSent_ _ ->
+                                            Nothing
+
+                                        FetchedCheckedAndPullRequestFailed_ _ ->
                                             Nothing
                                 )
                                 versions
@@ -110,9 +113,6 @@ update msg model =
               }
             , Lamdera.sendToBackend ResetRules
             )
-
-        CreateForkResult result ->
-            ( model, Cmd.none )
 
         PressedLogin ->
             ( model
@@ -137,6 +137,9 @@ update msg model =
             , Cmd.none
             )
 
+        PressedCreatePullRequest packageName ->
+            ( model, Lamdera.sendToBackend (PullRequestRequest packageName) )
+
 
 updateFromBackend : ToFrontend -> FrontendModel -> ( FrontendModel, Cmd FrontendMsg )
 updateFromBackend msg model =
@@ -155,14 +158,6 @@ updateFromBackend msg model =
               }
             , Cmd.none
             )
-
-
-createPullRequestButton =
-    Element.Input.button
-        buttonAttributes
-        { onPress = Just PressedCreateFork
-        , label = Element.text "Create pull request"
-        }
 
 
 resetBackendButton =
@@ -226,7 +221,6 @@ view model =
                                         , label = Element.text "Show requested order"
                                         }
                             , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
-                            , createPullRequestButton
                             , resetBackendButton
                             , resetRuleButton
                             ]
@@ -237,16 +231,21 @@ view model =
     }
 
 
-packagesView : FrontendModel -> Element msg
+packagesView : FrontendModel -> Element FrontendMsg
 packagesView model =
     Element.column
         [ Element.spacing 8 ]
         (Dict.toList model.state
             |> List.concatMap
                 (\( packageName, versions ) ->
-                    case List.maximumBy Types.updateIndex versions |> Maybe.map (packageView packageName) of
-                        Just a ->
-                            [ a ]
+                    case Elm.Package.fromString packageName of
+                        Just packageName_ ->
+                            case List.maximumBy Types.updateIndex versions |> Maybe.map (packageView packageName_) of
+                                Just a ->
+                                    [ a ]
+
+                                Nothing ->
+                                    []
 
                         Nothing ->
                             []
@@ -258,7 +257,7 @@ packagesView model =
                     Alphabetical ->
                         List.sortWith
                             (\( b0, a0, _ ) ( b1, a1, _ ) ->
-                                case compare a0 a1 of
+                                case compare (Elm.Package.toString a0) (Elm.Package.toString a1) of
                                     EQ ->
                                         Elm.Version.compare (Types.packageVersion_ b0) (Types.packageVersion_ b1)
 
@@ -273,69 +272,78 @@ packagesView model =
         )
 
 
-packageView : String -> PackageStatusFrontend -> ( PackageStatusFrontend, String, Element msg )
+packageView : Elm.Package.Name -> PackageStatusFrontend -> ( PackageStatusFrontend, Elm.Package.Name, Element FrontendMsg )
 packageView packageName status =
     ( status
     , packageName
     , Element.column
         []
-        [ Element.text (packageName ++ " " ++ Elm.Version.toString (Types.packageVersion_ status))
-        , case status of
-            Fetched_ _ ->
-                Element.text "Fetched"
+        (Element.text (Elm.Package.toString packageName ++ " " ++ Elm.Version.toString (Types.packageVersion_ status))
+            :: (case status of
+                    Fetched_ _ ->
+                        [ Element.text "Fetched" ]
 
-            FetchedAndChecked_ { result } ->
-                case result of
-                    RuleErrorsFromTag ruleResult ->
-                        Element.column []
-                            [ Element.el [ errorColor ] <| Element.text "RuleErrorsFromTag"
-                            , showRuleResult ruleResult
-                            ]
+                    FetchedAndChecked_ { result } ->
+                        [ Element.Input.button
+                            buttonAttributes
+                            { onPress = PressedCreatePullRequest packageName |> Just
+                            , label = Element.text "Create pull request"
+                            }
+                        , case result of
+                            HttpError httpError ->
+                                Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
 
-                    RuleErrorsAndDefaultBranchAndTagMatch ruleResult ->
-                        showRuleResult ruleResult
+                            CouldNotOpenDefaultBranchZip ->
+                                Element.el [ errorColor ] (Element.text "CouldNotOpenDefaultBranchZip")
 
-                    HttpError httpError ->
-                        Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
+                            PackageTagNotFound ->
+                                Element.el [ errorColor ] (Element.text "PackageTagNotFound")
 
-                    CouldNotOpenDefaultBranchZip ->
-                        Element.el [ errorColor ] (Element.text "CouldNotOpenDefaultBranchZip")
+                            RuleErrors runRuleResult ->
+                                showRuleResult runRuleResult
+                        ]
 
-                    PackageTagNotFound ->
-                        Element.el [ errorColor ] (Element.text "PackageTagNotFound")
+                    FetchingElmJsonAndDocsFailed_ _ _ _ ->
+                        [ Element.text "FetchingElmJsonAndDocsFailed" |> Element.el [ errorColor ] ]
 
-                    InvalidPackageName ->
-                        Element.el [ errorColor ] (Element.text "InvalidPackageName")
+                    FetchedCheckedAndPullRequestPending_ _ ->
+                        [ Element.text "Pull request pending" ]
 
-            FetchingElmJsonAndDocsFailed_ version int error ->
-                Element.text "FetchingElmJsonAndDocsFailed" |> Element.el [ errorColor ]
-        ]
+                    FetchedCheckedAndPullRequestSent_ _ ->
+                        [ Element.text "Pull request sent" ]
+
+                    FetchedCheckedAndPullRequestFailed_ { error } ->
+                        [ Element.el
+                            [ errorColor ]
+                            (Element.text <| "Pull request failed: " ++ httpErrorToString error)
+                        ]
+               )
+        )
     )
 
 
-showRuleResult : RunRuleResult PullRequestStatus -> Element msg
+showRuleResult : RunRuleResult -> Element msg
 showRuleResult ruleResult =
     case ruleResult of
-        RunRuleSuccessful { errors, oldElmJson, newElmJson } pullRequestStatus ->
-            if List.isEmpty errors then
-                Element.el
-                    [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
-                    (Element.text "Passed")
+        FoundErrors { errors, oldElmJson, newElmJson } ->
+            List.map
+                (\{ ruleName, message } ->
+                    Element.paragraph
+                        []
+                        [ Element.text <| ruleName ++ ": " ++ message ]
+                )
+                (List.Nonempty.toList errors)
+                ++ [ Element.text "Before:"
+                   , Element.text oldElmJson
+                   , Element.text "After:"
+                   , Element.text newElmJson
+                   ]
+                |> Element.column [ errorColor ]
 
-            else
-                List.map
-                    (\{ ruleName, message } ->
-                        Element.paragraph
-                            []
-                            [ Element.text <| ruleName ++ ": " ++ message ]
-                    )
-                    errors
-                    ++ [ Element.text "Before:"
-                       , Element.text oldElmJson
-                       , Element.text "After:"
-                       , Element.text newElmJson
-                       ]
-                    |> Element.column [ errorColor ]
+        NoErrorsFounds ->
+            Element.el
+                [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
+                (Element.text "Passed")
 
         ParsingError ->
             Element.paragraph [ errorColor ] [ Element.text "Parsing error" ]

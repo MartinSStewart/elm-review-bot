@@ -18,15 +18,16 @@ import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
+import PackageStatus exposing (PackageStatus(..), ReviewResult(..), RunRuleResult(..))
 import Parser exposing ((|.), (|=), Parser)
 import Process
 import Review.Fix
 import Review.Project
 import Review.Project.Dependency
 import Review.Rule
-import Set
+import Set exposing (Set)
 import Task exposing (Task)
-import Types exposing (..)
+import Types exposing (BackendModel, BackendMsg(..), PackageEndpoint, ToBackend(..), ToFrontend(..))
 import Zip exposing (Zip)
 import Zip.Entry
 
@@ -138,14 +139,14 @@ getAllPackages cachedCount =
         }
 
 
-getPackageDocs : String -> Version -> Task Http.Error (List Elm.Docs.Module)
+getPackageDocs : Elm.Package.Name -> Version -> Task Http.Error (List Elm.Docs.Module)
 getPackageDocs packageName version =
     Http.task
         { method = "GET"
         , headers = []
         , url =
             "https://package.elm-lang.org/packages/"
-                ++ packageName
+                ++ Elm.Package.toString packageName
                 ++ "/"
                 ++ Version.toString version
                 ++ "/docs.json"
@@ -178,14 +179,14 @@ getPackageDocs packageName version =
         }
 
 
-getPackageElmJson : String -> Version -> Task Http.Error Elm.Project.Project
+getPackageElmJson : Elm.Package.Name -> Version -> Task Http.Error Elm.Project.Project
 getPackageElmJson packageName version =
     Http.task
         { method = "GET"
         , headers = []
         , url =
             "https://package.elm-lang.org/packages/"
-                ++ packageName
+                ++ Elm.Package.toString packageName
                 ++ "/"
                 ++ Version.toString version
                 ++ "/elm.json"
@@ -348,28 +349,14 @@ update msg model =
                     { model
                         | cachedPackages =
                             Dict.update
-                                packageName
+                                (Elm.Package.toString packageName)
                                 (Maybe.map (AssocList.insert version packageStatus))
                                 model.cachedPackages
                         , updateIndex = model.updateIndex + 1
                     }
             in
             ( model2
-            , Cmd.batch
-                (nextTodo model2
-                    :: List.map
-                        (\client ->
-                            Lamdera.sendToFrontend
-                                client
-                                (Updates
-                                    (Dict.singleton
-                                        packageName
-                                        (List.filterMap Types.statusToStatusFrontend [ packageStatus ])
-                                    )
-                                )
-                        )
-                        (Set.toList model2.clients)
-                )
+            , Cmd.batch (nextTodo model2 :: sendChange model.clients packageName packageStatus)
             )
 
         RanNoUnused { packageName, elmJson, docs } result ->
@@ -386,28 +373,14 @@ update msg model =
                     { model
                         | cachedPackages =
                             Dict.update
-                                packageName
+                                (Elm.Package.toString packageName)
                                 (Maybe.map (AssocList.insert elmJson.version packageStatus))
                                 model.cachedPackages
                         , updateIndex = model.updateIndex + 1
                     }
             in
             ( model2
-            , Cmd.batch
-                (nextTodo model2
-                    :: List.map
-                        (\client ->
-                            Lamdera.sendToFrontend
-                                client
-                                (Updates
-                                    (Dict.singleton
-                                        packageName
-                                        (List.filterMap Types.statusToStatusFrontend [ packageStatus ])
-                                    )
-                                )
-                        )
-                        (Set.toList model2.clients)
-                )
+            , Cmd.batch (nextTodo model2 :: sendChange model.clients packageName packageStatus)
             )
 
         ClientConnected sessionId clientId ->
@@ -422,10 +395,70 @@ update msg model =
         ClientDisconnected _ clientId ->
             ( { model | clients = Set.remove clientId model.clients }, Cmd.none )
 
+        CreatePullRequestResult packageName version result ->
+            let
+                model2 =
+                    { model
+                        | cachedPackages =
+                            Dict.update
+                                (Elm.Package.toString packageName)
+                                (\maybePackages ->
+                                    case maybePackages of
+                                        Just packages ->
+                                            AssocList.update version
+                                                (Maybe.map
+                                                    (\packageStatus ->
+                                                        case result of
+                                                            Ok ok ->
+                                                                PackageStatus.pullRequestSent ok packageStatus
+
+                                                            Err err ->
+                                                                PackageStatus.pullRequestFailed err packageStatus
+                                                    )
+                                                )
+                                                packages
+                                                |> Just
+
+                                        Nothing ->
+                                            Nothing
+                                )
+                                model.cachedPackages
+                    }
+            in
+            ( model2
+            , case Dict.get (Elm.Package.toString packageName) model2.cachedPackages of
+                Just packages ->
+                    case AssocList.get version packages of
+                        Just packageStatus ->
+                            Cmd.batch (sendChange model.clients packageName packageStatus)
+
+                        Nothing ->
+                            Cmd.none
+
+                Nothing ->
+                    Cmd.none
+            )
+
+
+sendChange : Set ClientId -> Elm.Package.Name -> PackageStatus -> List (Cmd backendMsg)
+sendChange clients packageName packageStatus =
+    List.map
+        (\client ->
+            Lamdera.sendToFrontend
+                client
+                (Updates
+                    (Dict.singleton
+                        (Elm.Package.toString packageName)
+                        (List.filterMap Types.statusToStatusFrontend [ packageStatus ])
+                    )
+                )
+        )
+        (Set.toList clients)
+
 
 sendUpdates : ClientId -> BackendModel -> Cmd backendMsg
 sendUpdates clientId model =
-    Dict.map (\_ value -> AssocList.values value |> List.filterMap statusToStatusFrontend) model.cachedPackages
+    Dict.map (\_ value -> AssocList.values value |> List.filterMap Types.statusToStatusFrontend) model.cachedPackages
         |> Updates
         |> Lamdera.sendToFrontend clientId
 
@@ -433,45 +466,62 @@ sendUpdates clientId model =
 nextTodo : BackendModel -> Cmd BackendMsg
 nextTodo model =
     let
-        maybeNextTodo : Maybe ( String, PackageStatus )
+        maybeNextTodo : Maybe ( Elm.Package.Name, PackageStatus )
         maybeNextTodo =
             Dict.foldl
                 (\packageName versions currentTodo ->
-                    List.foldl
-                        (\packageStatus currentTodo_ ->
-                            case packageStatus of
-                                Pending _ _ ->
-                                    Just ( packageName, packageStatus )
+                    case Elm.Package.fromString packageName of
+                        Just packageName_ ->
+                            List.foldl
+                                (\packageStatus currentTodo_ ->
+                                    case packageStatus of
+                                        Pending _ _ ->
+                                            Just ( packageName_, packageStatus )
 
-                                Fetched { elmJson } ->
-                                    if String.startsWith "elm/" packageName then
-                                        currentTodo_
-
-                                    else
-                                        case currentTodo_ of
-                                            Just ( _, Pending _ _ ) ->
+                                        Fetched { elmJson } ->
+                                            if String.startsWith "elm/" packageName then
                                                 currentTodo_
 
-                                            _ ->
-                                                if
-                                                    List.count
-                                                        (Types.packageVersion >> Version.compare elmJson.version >> (/=) GT)
-                                                        (AssocList.values versions)
-                                                        == 1
-                                                then
-                                                    Just ( packageName, packageStatus )
+                                            else
+                                                case currentTodo_ of
+                                                    Just ( _, Pending _ _ ) ->
+                                                        currentTodo_
 
-                                                else
-                                                    currentTodo_
+                                                    _ ->
+                                                        if
+                                                            List.count
+                                                                (Types.packageVersion
+                                                                    >> Version.compare elmJson.version
+                                                                    >> (/=) GT
+                                                                )
+                                                                (AssocList.values versions)
+                                                                == 1
+                                                        then
+                                                            Just ( packageName_, packageStatus )
 
-                                FetchedAndChecked _ ->
-                                    currentTodo_
+                                                        else
+                                                            currentTodo_
 
-                                FetchingElmJsonAndDocsFailed _ _ _ ->
-                                    currentTodo_
-                        )
-                        currentTodo
-                        (AssocList.values versions)
+                                        FetchedAndChecked _ ->
+                                            currentTodo_
+
+                                        FetchingElmJsonAndDocsFailed _ _ _ ->
+                                            currentTodo_
+
+                                        FetchedCheckedAndPullRequestPending _ ->
+                                            currentTodo_
+
+                                        FetchedCheckedAndPullRequestSent _ _ ->
+                                            currentTodo_
+
+                                        FetchedCheckedAndPullRequestFailed _ _ ->
+                                            currentTodo_
+                                )
+                                currentTodo
+                                (AssocList.values versions)
+
+                        Nothing ->
+                            currentTodo
                 )
                 Nothing
                 model.cachedPackages
@@ -482,19 +532,18 @@ nextTodo model =
                 |> Task.andThen (\_ -> getPackageElmJson packageName version)
                 |> Task.andThen
                     (\elmJson ->
-                        getPackageDocs packageName version |> Task.map (List.map removeComments >> Tuple.pair elmJson)
+                        getPackageDocs packageName version
+                            |> Task.map (List.map PackageStatus.removeComments >> Tuple.pair elmJson)
                     )
                 |> Task.attempt (FetchedElmJsonAndDocs { packageName = packageName, version = version })
 
         Just ( packageName, Fetched { elmJson, docs } ) ->
-            (case String.split "/" packageName of
-                [ owner, repo ] ->
-                    Process.sleep 200
-                        |> Task.andThen (\_ -> reportErrors (Github.owner owner) repo elmJson model)
-
-                _ ->
-                    Task.succeed InvalidPackageName
-            )
+            let
+                ( owner, repo ) =
+                    ownerAndRepo packageName
+            in
+            Process.sleep 200
+                |> Task.andThen (\_ -> reportErrors owner repo elmJson model)
                 |> Task.perform (RanNoUnused { packageName = packageName, elmJson = elmJson, docs = docs })
 
         Just ( _, FetchedAndChecked _ ) ->
@@ -503,8 +552,28 @@ nextTodo model =
         Just ( _, FetchingElmJsonAndDocsFailed _ _ _ ) ->
             Cmd.none
 
+        Just ( _, FetchedCheckedAndPullRequestPending _ ) ->
+            Cmd.none
+
+        Just ( _, FetchedCheckedAndPullRequestSent _ _ ) ->
+            Cmd.none
+
+        Just ( _, FetchedCheckedAndPullRequestFailed _ _ ) ->
+            Cmd.none
+
         Nothing ->
             Cmd.none
+
+
+ownerAndRepo : Elm.Package.Name -> ( Github.Owner, String )
+ownerAndRepo packageName =
+    case Elm.Package.toString packageName |> String.split "/" of
+        [ originalOwner_, originalRepo_ ] ->
+            ( Github.owner originalOwner_, originalRepo_ )
+
+        _ ->
+            -- This should never happen
+            ( Github.owner "", "" )
 
 
 createPullRequest : Int -> String -> Github.Owner -> String -> String -> Task Http.Error { url : String }
@@ -639,13 +708,12 @@ reportErrors owner repo elmJson model =
                             case Zip.fromBytes bytes of
                                 Just zip ->
                                     let
-                                        result : RunRuleResult PullRequestStatus
+                                        result : RunRuleResult
                                         result =
                                             checkPackage elmJson model.cachedPackages zip
-                                                |> mapRunRuleResult (always PullRequestNotSent)
                                     in
                                     if branchSha == tagSha then
-                                        RuleErrorsAndDefaultBranchAndTagMatch result |> Task.succeed
+                                        RuleErrors result |> Task.succeed
                                         --createPullRequest
                                         --    (List.length errors)
                                         --    elmJsonText
@@ -655,7 +723,7 @@ reportErrors owner repo elmJson model =
                                         --    |> Task.map (\{ url } -> RuleErrorsAndPullRequest { errors = errors, pullRequestUrl = url })
 
                                     else
-                                        RuleErrorsFromTag result |> Task.succeed
+                                        RuleErrors result |> Task.succeed
 
                                 Nothing ->
                                     Task.succeed CouldNotOpenDefaultBranchZip
@@ -760,7 +828,7 @@ project elmJson srcModules testModules =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (AssocList.Dict Version PackageStatus) -> Zip -> RunRuleResult ()
+checkPackage : Elm.Project.PackageInfo -> Dict String (AssocList.Dict Version PackageStatus) -> Zip -> RunRuleResult
 checkPackage elmJson cached zip =
     let
         modules : String -> List { path : String, source : String }
@@ -822,6 +890,24 @@ checkPackage elmJson cached zip =
                                                 FetchingElmJsonAndDocsFailed _ _ _ ->
                                                     Nothing
 
+                                                FetchedCheckedAndPullRequestPending data ->
+                                                    Just
+                                                        ( Types.packageVersion package
+                                                        , ( data.elmJson, data.docs )
+                                                        )
+
+                                                FetchedCheckedAndPullRequestSent data _ ->
+                                                    Just
+                                                        ( Types.packageVersion package
+                                                        , ( data.elmJson, data.docs )
+                                                        )
+
+                                                FetchedCheckedAndPullRequestFailed data _ ->
+                                                    Just
+                                                        ( Types.packageVersion package
+                                                        , ( data.elmJson, data.docs )
+                                                        )
+
                                         else
                                             Nothing
                                     )
@@ -876,7 +962,7 @@ runRule :
     -> Maybe Review.Rule.ProjectData
     -> List Review.Rule.ReviewError
     -> Review.Project.Project
-    -> RunRuleResult ()
+    -> RunRuleResult
 runRule stepsLeft originalElmJson rule projectData errors projectWithDependencies =
     let
         result : { errors : List Review.Rule.ReviewError, rules : List Review.Rule.Rule, projectData : Maybe Review.Rule.ProjectData }
@@ -928,22 +1014,26 @@ runRule stepsLeft originalElmJson rule projectData errors projectWithDependencie
                         FixFailed fixError
 
             ( [], Just elmJson ) ->
-                RunRuleSuccessful
-                    { errors =
-                        List.map
-                            (\error ->
-                                { message = Review.Rule.errorMessage error
-                                , ruleName = Review.Rule.errorRuleName error
-                                , filePath = Review.Rule.errorFilePath error
-                                , details = Review.Rule.errorDetails error
-                                , range = Review.Rule.errorRange error
-                                }
-                            )
-                            errors
-                    , oldElmJson = originalElmJson
-                    , newElmJson = elmJson.raw
-                    }
-                    ()
+                case List.Nonempty.fromList errors of
+                    Just nonemptyErrors ->
+                        FoundErrors
+                            { errors =
+                                List.Nonempty.map
+                                    (\error ->
+                                        { message = Review.Rule.errorMessage error
+                                        , ruleName = Review.Rule.errorRuleName error
+                                        , filePath = Review.Rule.errorFilePath error
+                                        , details = Review.Rule.errorDetails error
+                                        , range = Review.Rule.errorRange error
+                                        }
+                                    )
+                                    nonemptyErrors
+                            , oldElmJson = originalElmJson
+                            , newElmJson = elmJson.raw
+                            }
+
+                    Nothing ->
+                        NoErrorsFounds
 
             _ ->
                 IncorrectProject
@@ -951,6 +1041,15 @@ runRule stepsLeft originalElmJson rule projectData errors projectWithDependencie
 
 updateFromFrontend : SessionId -> ClientId -> ToBackend -> BackendModel -> ( BackendModel, Cmd BackendMsg )
 updateFromFrontend sessionId clientId msg model =
+    let
+        authenticate : ( BackendModel, Cmd BackendMsg ) -> ( BackendModel, Cmd BackendMsg )
+        authenticate tuple =
+            if Set.member sessionId model.clients then
+                tuple
+
+            else
+                ( model, Cmd.none )
+    in
     case msg of
         ResetBackend ->
             init |> Tuple.mapFirst (\m -> { m | clients = model.clients })
@@ -969,28 +1068,89 @@ updateFromFrontend sessionId clientId msg model =
                 ( model, Cmd.none )
 
         ResetRules ->
-            ( { model
-                | cachedPackages =
-                    Dict.map
-                        (\_ versions ->
-                            AssocList.map
-                                (\_ packageStatus ->
-                                    case packageStatus of
-                                        Fetched data ->
-                                            Fetched data
+            authenticate
+                ( { model
+                    | cachedPackages =
+                        Dict.map
+                            (\_ versions ->
+                                AssocList.map
+                                    (\_ packageStatus ->
+                                        case packageStatus of
+                                            Fetched data ->
+                                                Fetched data
 
-                                        Pending version updateIndex ->
-                                            Pending version updateIndex
+                                            Pending version updateIndex ->
+                                                Pending version updateIndex
 
-                                        FetchedAndChecked { updateIndex, docs, elmJson } ->
-                                            Fetched { updateIndex = updateIndex, docs = docs, elmJson = elmJson }
+                                            FetchedAndChecked { updateIndex, docs, elmJson } ->
+                                                Fetched { updateIndex = updateIndex, docs = docs, elmJson = elmJson }
 
-                                        FetchingElmJsonAndDocsFailed version updateIndex _ ->
-                                            Pending version updateIndex
-                                )
-                                versions
-                        )
-                        model.cachedPackages
-              }
-            , getAllPackages packageCountOffset
-            )
+                                            FetchingElmJsonAndDocsFailed version updateIndex _ ->
+                                                Pending version updateIndex
+
+                                            FetchedCheckedAndPullRequestPending fetchedAndChecked_ ->
+                                                FetchedCheckedAndPullRequestPending fetchedAndChecked_
+
+                                            FetchedCheckedAndPullRequestSent fetchedAndChecked_ record ->
+                                                FetchedCheckedAndPullRequestSent fetchedAndChecked_ record
+
+                                            FetchedCheckedAndPullRequestFailed fetchedAndChecked_ error ->
+                                                FetchedCheckedAndPullRequestFailed fetchedAndChecked_ error
+                                    )
+                                    versions
+                            )
+                            model.cachedPackages
+                  }
+                , getAllPackages packageCountOffset
+                )
+
+        PullRequestRequest packageName ->
+            authenticate
+                (case ( Dict.get (Elm.Package.toString packageName) model.cachedPackages, ownerAndRepo packageName ) of
+                    ( Just packageVersions, ( owner, repo ) ) ->
+                        case AssocList.toList packageVersions |> List.maximumBy (Tuple.first >> Version.toTuple) of
+                            Just ( version, FetchedAndChecked latestPackage ) ->
+                                case PackageStatus.getRunRuleResult latestPackage.result of
+                                    Just (FoundErrors ({ errors, newElmJson } as foundErrors)) ->
+                                        ( { model
+                                            | cachedPackages =
+                                                Dict.update
+                                                    (Elm.Package.toString packageName)
+                                                    (\maybePackages ->
+                                                        case maybePackages of
+                                                            Just packages ->
+                                                                AssocList.update version
+                                                                    (Maybe.map (PackageStatus.pullRequestPending foundErrors))
+                                                                    packages
+                                                                    |> Just
+
+                                                            Nothing ->
+                                                                Nothing
+                                                    )
+                                                    model.cachedPackages
+                                          }
+                                        , Cmd.batch
+                                            [ Github.getRepository
+                                                { authToken = Env.githubAuth, repo = repo, owner = owner }
+                                                |> Task.andThen
+                                                    (\{ defaultBranch } ->
+                                                        createPullRequest
+                                                            (List.Nonempty.length errors)
+                                                            newElmJson
+                                                            owner
+                                                            repo
+                                                            defaultBranch
+                                                    )
+                                                |> Task.attempt (CreatePullRequestResult packageName version)
+                                            ]
+                                        )
+
+                                    _ ->
+                                        ( model, Cmd.none )
+
+                            _ ->
+                                ( model, Cmd.none )
+
+                    _ ->
+                        ( model, Cmd.none )
+                )

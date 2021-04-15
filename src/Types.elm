@@ -7,12 +7,10 @@ import Dict exposing (Dict)
 import Elm.Docs
 import Elm.Package
 import Elm.Project
-import Elm.Syntax.Range exposing (Range)
 import Elm.Version exposing (Version)
 import Http
 import Lamdera exposing (ClientId, SessionId)
-import List.Nonempty exposing (Nonempty)
-import Review.Fix
+import PackageStatus exposing (PackageStatus(..), ReviewResult)
 import Set exposing (Set)
 import Url exposing (Url)
 
@@ -30,45 +28,9 @@ type LoginStatus
     | LoggedIn
 
 
-type alias Error =
-    { message : String
-    , ruleName : String
-    , filePath : String
-    , details : List String
-    , range : Range
-    }
-
-
 type DisplayOrder
     = RequestOrder
     | Alphabetical
-
-
-type PackageStatus
-    = Pending Version Int
-    | Fetched
-        { updateIndex : Int
-        , docs : List Elm.Docs.Module
-        , elmJson : Elm.Project.PackageInfo
-        }
-    | FetchedAndChecked
-        { updateIndex : Int
-        , docs : List Elm.Docs.Module
-        , elmJson : Elm.Project.PackageInfo
-        , result : ReviewResult
-        }
-    | FetchingElmJsonAndDocsFailed Version Int Http.Error
-
-
-removeComments : Elm.Docs.Module -> Elm.Docs.Module
-removeComments docs =
-    { name = docs.name
-    , comment = ""
-    , unions = List.map (\union -> { union | comment = "" }) docs.unions
-    , aliases = List.map (\alias -> { alias | comment = "" }) docs.aliases
-    , values = List.map (\value -> { value | comment = "" }) docs.values
-    , binops = List.map (\binop -> { binop | comment = "" }) docs.binops
-    }
 
 
 type PackageStatusFrontend
@@ -82,6 +44,20 @@ type PackageStatusFrontend
         , result : ReviewResult
         }
     | FetchingElmJsonAndDocsFailed_ Version Int Http.Error
+    | FetchedCheckedAndPullRequestPending_
+        { version : Version
+        , updateIndex : Int
+        }
+    | FetchedCheckedAndPullRequestSent_
+        { version : Version
+        , updateIndex : Int
+        , url : String
+        }
+    | FetchedCheckedAndPullRequestFailed_
+        { version : Version
+        , updateIndex : Int
+        , error : Http.Error
+        }
 
 
 statusToStatusFrontend : PackageStatus -> Maybe PackageStatusFrontend
@@ -104,6 +80,29 @@ statusToStatusFrontend packageStatus =
         FetchingElmJsonAndDocsFailed version int error ->
             FetchingElmJsonAndDocsFailed_ version int error |> Just
 
+        FetchedCheckedAndPullRequestPending a ->
+            FetchedCheckedAndPullRequestPending_
+                { version = a.elmJson.version
+                , updateIndex = a.updateIndex
+                }
+                |> Just
+
+        FetchedCheckedAndPullRequestSent a { url } ->
+            FetchedCheckedAndPullRequestSent_
+                { version = a.elmJson.version
+                , updateIndex = a.updateIndex
+                , url = url
+                }
+                |> Just
+
+        FetchedCheckedAndPullRequestFailed a error ->
+            FetchedCheckedAndPullRequestFailed_
+                { version = a.elmJson.version
+                , updateIndex = a.updateIndex
+                , error = error
+                }
+                |> Just
+
 
 packageVersion : PackageStatus -> Version
 packageVersion packageStatus =
@@ -120,6 +119,15 @@ packageVersion packageStatus =
         FetchingElmJsonAndDocsFailed version _ _ ->
             version
 
+        FetchedCheckedAndPullRequestPending fetchedAndChecked_ ->
+            fetchedAndChecked_.elmJson.version
+
+        FetchedCheckedAndPullRequestSent fetchedAndChecked_ _ ->
+            fetchedAndChecked_.elmJson.version
+
+        FetchedCheckedAndPullRequestFailed fetchedAndChecked_ _ ->
+            fetchedAndChecked_.elmJson.version
+
 
 packageVersion_ : PackageStatusFrontend -> Version
 packageVersion_ packageStatus =
@@ -131,6 +139,15 @@ packageVersion_ packageStatus =
             version
 
         FetchingElmJsonAndDocsFailed_ version _ _ ->
+            version
+
+        FetchedCheckedAndPullRequestPending_ { version } ->
+            version
+
+        FetchedCheckedAndPullRequestSent_ { version } ->
+            version
+
+        FetchedCheckedAndPullRequestFailed_ { version } ->
             version
 
 
@@ -146,6 +163,15 @@ updateIndex packageStatus =
         FetchingElmJsonAndDocsFailed_ _ a _ ->
             a
 
+        FetchedCheckedAndPullRequestPending_ a ->
+            a.updateIndex
+
+        FetchedCheckedAndPullRequestSent_ a ->
+            a.updateIndex
+
+        FetchedCheckedAndPullRequestFailed_ a ->
+            a.updateIndex
+
 
 type alias BackendModel =
     { cachedPackages : Dict String (AssocList.Dict Version PackageStatus)
@@ -158,86 +184,37 @@ type FrontendMsg
     = UrlClicked UrlRequest
     | UrlChanged Url
     | ToggleOrder
-    | PressedCreateFork
     | PressedResetBackend
     | PressedResetRules
-    | CreateForkResult (Result Http.Error { url : String })
     | NoOpFrontendMsg
     | PressedLogin
     | TypedPassword String
+    | PressedCreatePullRequest Elm.Package.Name
 
 
 type ToBackend
     = ResetBackend
     | ResetRules
     | LoginRequest String
+    | PullRequestRequest Elm.Package.Name
 
 
 type BackendMsg
     = GotNewPackagePreviews (Result Http.Error (List ( String, Version )))
     | FetchedElmJsonAndDocs
-        { packageName : String
+        { packageName : Elm.Package.Name
         , version : Version
         }
         (Result Http.Error ( Elm.Project.Project, List Elm.Docs.Module ))
     | RanNoUnused
-        { packageName : String
+        { packageName : Elm.Package.Name
         , elmJson : Elm.Project.PackageInfo
         , docs : List Elm.Docs.Module
         }
         ReviewResult
     | ClientConnected SessionId ClientId
     | ClientDisconnected SessionId ClientId
-
-
-type ReviewResult
-    = CouldNotOpenDefaultBranchZip
-    | PackageTagNotFound
-    | HttpError Http.Error
-    | InvalidPackageName
-    | RuleErrorsFromTag (RunRuleResult PullRequestStatus)
-    | RuleErrorsAndDefaultBranchAndTagMatch (RunRuleResult PullRequestStatus)
-
-
-type PullRequestStatus
-    = PullRequestNotSent
-    | Sent
-    | Failed Http.Error
-
-
-type RunRuleResult a
-    = ParsingError
-    | IncorrectProject
-    | FixFailed Review.Fix.Problem
-    | NotEnoughIterations
-    | RunRuleSuccessful { errors : List Error, oldElmJson : String, newElmJson : String } a
-    | NotAnElm19xPackage
-    | DependenciesDontExist (Nonempty Elm.Package.Name)
-
-
-mapRunRuleResult : (a -> b) -> RunRuleResult a -> RunRuleResult b
-mapRunRuleResult mapUserData result =
-    case result of
-        RunRuleSuccessful data userData ->
-            RunRuleSuccessful data (mapUserData userData)
-
-        ParsingError ->
-            ParsingError
-
-        IncorrectProject ->
-            IncorrectProject
-
-        NotEnoughIterations ->
-            NotEnoughIterations
-
-        NotAnElm19xPackage ->
-            NotAnElm19xPackage
-
-        DependenciesDontExist packageNames ->
-            DependenciesDontExist packageNames
-
-        FixFailed problem ->
-            FixFailed problem
+    | CreatePullRequestResult Elm.Package.Name Version (Result Http.Error { url : String })
 
 
 type ToFrontend
