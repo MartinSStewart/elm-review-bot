@@ -290,12 +290,7 @@ packageView count packageName status =
                         [ Element.text "Fetched" ]
 
                     FetchedAndChecked_ { result } ->
-                        [ Element.Input.button
-                            buttonAttributes
-                            { onPress = PressedCreatePullRequest packageName |> Just
-                            , label = Element.text "Create pull request"
-                            }
-                        , case result of
+                        [ case result of
                             HttpError httpError ->
                                 Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
 
@@ -306,7 +301,7 @@ packageView count packageName status =
                                 Element.el [ errorColor ] (Element.text "PackageTagNotFound")
 
                             RuleErrors runRuleResult ->
-                                showRuleResult runRuleResult
+                                showRuleResult packageName runRuleResult
                         ]
 
                     FetchingElmJsonAndDocsFailed_ _ _ _ ->
@@ -328,17 +323,22 @@ packageView count packageName status =
     )
 
 
-showRuleResult : RunRuleResult -> Element msg
-showRuleResult ruleResult =
+showRuleResult : Elm.Package.Name -> RunRuleResult -> Element FrontendMsg
+showRuleResult packageName ruleResult =
     case ruleResult of
         FoundErrors { errors, oldElmJson, newElmJson } ->
-            List.map
-                (\{ ruleName, message } ->
-                    Element.paragraph
-                        []
-                        [ Element.text <| ruleName ++ ": " ++ message ]
-                )
-                (List.Nonempty.toList errors)
+            Element.Input.button
+                buttonAttributes
+                { onPress = PressedCreatePullRequest packageName |> Just
+                , label = Element.text "Create pull request"
+                }
+                :: List.map
+                    (\{ ruleName, message } ->
+                        Element.paragraph
+                            []
+                            [ Element.text <| ruleName ++ ": " ++ message ]
+                    )
+                    (List.Nonempty.toList errors)
                 ++ [ Element.text "Before:"
                    , Element.text oldElmJson
                    , Element.text "After:"
