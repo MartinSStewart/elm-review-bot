@@ -240,7 +240,7 @@ packagesView model =
                 (\( packageName, versions ) ->
                     case Elm.Package.fromString packageName of
                         Just packageName_ ->
-                            case List.maximumBy Types.updateIndex versions |> Maybe.map (packageView packageName_) of
+                            case List.maximumBy Types.updateIndex versions |> Maybe.map (packageView (List.length versions) packageName_) of
                                 Just a ->
                                     [ a ]
 
@@ -272,13 +272,19 @@ packagesView model =
         )
 
 
-packageView : Elm.Package.Name -> PackageStatusFrontend -> ( PackageStatusFrontend, Elm.Package.Name, Element FrontendMsg )
-packageView packageName status =
+packageView : Int -> Elm.Package.Name -> PackageStatusFrontend -> ( PackageStatusFrontend, Elm.Package.Name, Element FrontendMsg )
+packageView count packageName status =
     ( status
     , packageName
     , Element.column
         []
-        (Element.text (Elm.Package.toString packageName ++ " " ++ Elm.Version.toString (Types.packageVersion_ status))
+        (Element.text
+            (Elm.Package.toString packageName
+                ++ " "
+                ++ Elm.Version.toString (Types.packageVersion_ status)
+                ++ " total: "
+                ++ String.fromInt count
+            )
             :: (case status of
                     Fetched_ _ ->
                         [ Element.text "Fetched" ]
