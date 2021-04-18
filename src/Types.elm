@@ -190,6 +190,7 @@ type FrontendMsg
     | PressedLogin
     | TypedPassword String
     | PressedCreatePullRequest Elm.Package.Name
+    | PressedRerunPackage Elm.Package.Name Version
 
 
 type ToBackend
@@ -197,6 +198,7 @@ type ToBackend
     | ResetRules
     | LoginRequest String
     | PullRequestRequest Elm.Package.Name
+    | RerunPackageRequest Elm.Package.Name Version
 
 
 type BackendMsg
@@ -215,6 +217,13 @@ type BackendMsg
     | ClientConnected SessionId ClientId
     | ClientDisconnected SessionId ClientId
     | CreatePullRequestResult Elm.Package.Name Version (Result Http.Error { url : String })
+    | ReranPackage
+        { packageName : Elm.Package.Name
+        , elmJson : Elm.Project.PackageInfo
+        , docs : List Elm.Docs.Module
+        , updateIndex : Int
+        }
+        ReviewResult
 
 
 type ToFrontend

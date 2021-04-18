@@ -140,6 +140,9 @@ update msg model =
         PressedCreatePullRequest packageName ->
             ( model, Lamdera.sendToBackend (PullRequestRequest packageName) )
 
+        PressedRerunPackage name version ->
+            ( model, Lamdera.sendToBackend (RerunPackageRequest name version) )
+
 
 updateFromBackend : ToFrontend -> FrontendModel -> ( FrontendModel, Cmd FrontendMsg )
 updateFromBackend msg model =
@@ -307,7 +310,7 @@ packageView count packageName status =
                                 Element.el [ errorColor ] (Element.text "PackageTagNotFound")
 
                             RuleErrors runRuleResult ->
-                                showRuleResult packageName runRuleResult
+                                showRuleResult packageName (Types.packageVersion_ status) runRuleResult
                         ]
 
                     FetchingElmJsonAndDocsFailed_ _ _ _ ->
@@ -344,8 +347,17 @@ createPullRequestButton firstAttempt packageName =
         }
 
 
-showRuleResult : Elm.Package.Name -> RunRuleResult -> Element FrontendMsg
-showRuleResult packageName ruleResult =
+rerunPackageButton : Elm.Package.Name -> Elm.Version.Version -> Element FrontendMsg
+rerunPackageButton packageName version =
+    Element.Input.button
+        buttonAttributes
+        { onPress = PressedRerunPackage packageName version |> Just
+        , label = Element.text "Rerun package"
+        }
+
+
+showRuleResult : Elm.Package.Name -> Elm.Version.Version -> RunRuleResult -> Element FrontendMsg
+showRuleResult packageName version ruleResult =
     case ruleResult of
         FoundErrors { errors, oldElmJson, newElmJson } ->
             createPullRequestButton True packageName
@@ -368,8 +380,12 @@ showRuleResult packageName ruleResult =
                 [ Element.Font.color <| Element.rgb 0.1 0.7 0.1 ]
                 (Element.text "Passed")
 
-        ParsingError ->
-            Element.paragraph [ errorColor ] [ Element.text "Parsing error" ]
+        ParsingError errors ->
+            List.Nonempty.toList errors
+                |> List.map (\error -> Element.paragraph [] [ Element.text error ])
+                |> (::) (Element.text "Parsing errors: ")
+                |> (::) (rerunPackageButton packageName version)
+                |> Element.column [ errorColor ]
 
         IncorrectProject ->
             Element.paragraph [ errorColor ] [ Element.text "Incorrect project" ]

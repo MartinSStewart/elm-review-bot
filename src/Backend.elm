@@ -439,6 +439,26 @@ update msg model =
                     Cmd.none
             )
 
+        ReranPackage { packageName, docs, elmJson, updateIndex } reviewResult ->
+            let
+                packageStatus =
+                    FetchedAndChecked
+                        { updateIndex = updateIndex
+                        , docs = docs
+                        , elmJson = elmJson
+                        , result = reviewResult
+                        }
+            in
+            ( { model
+                | cachedPackages =
+                    Dict.update
+                        (Elm.Package.toString packageName)
+                        (Maybe.map (AssocList.insert elmJson.version packageStatus))
+                        model.cachedPackages
+              }
+            , Cmd.batch (sendChange model.clients packageName packageStatus)
+            )
+
 
 sendChange : Set ClientId -> Elm.Package.Name -> PackageStatus -> List (Cmd backendMsg)
 sendChange clients packageName packageStatus =
@@ -991,58 +1011,73 @@ runRule stepsLeft originalElmJson rule projectData errors projectWithDependencie
                         Nothing
                 )
                 result.errors
+
+        parsingErrors : Maybe (List.Nonempty.Nonempty String)
+        parsingErrors =
+            List.filterMap
+                (\error ->
+                    if Review.Rule.errorRuleName error == "ParsingError" then
+                        Review.Rule.errorMessage error |> Just
+
+                    else
+                        Nothing
+                )
+                result.errors
+                |> List.Nonempty.fromList
     in
-    if stepsLeft <= 0 then
-        NotEnoughIterations
+    case parsingErrors of
+        Just nonempty ->
+            ParsingError nonempty
 
-    else if List.any (\error -> Review.Rule.errorRuleName error == "ParsingError") result.errors then
-        ParsingError
+        Nothing ->
+            if stepsLeft <= 0 then
+                NotEnoughIterations
 
-    else if List.any (\error -> Review.Rule.errorRuleName error == "Incorrect project") result.errors then
-        IncorrectProject
-
-    else
-        case ( elmJsonFixes, Review.Project.elmJson projectWithDependencies ) of
-            ( ( error, fixes ) :: _, Just elmJson ) ->
-                case Review.Fix.fix (Review.Rule.errorTarget error) fixes elmJson.raw of
-                    Review.Fix.Successful newRaw ->
-                        case Json.Decode.decodeString Elm.Project.decoder newRaw of
-                            Ok elmJsonParsed ->
-                                Review.Project.addElmJson
-                                    { elmJson | raw = newRaw, project = elmJsonParsed }
-                                    projectWithDependencies
-                                    |> runRule (stepsLeft - 1) originalElmJson rule projectData (error :: errors)
-
-                            Err _ ->
-                                FixFailed (Review.Fix.SourceCodeIsNotValid "elm.json is now an application")
-
-                    Review.Fix.Errored fixError ->
-                        FixFailed fixError
-
-            ( [], Just elmJson ) ->
-                case List.Nonempty.fromList errors of
-                    Just nonemptyErrors ->
-                        FoundErrors
-                            { errors =
-                                List.Nonempty.map
-                                    (\error ->
-                                        { message = Review.Rule.errorMessage error
-                                        , ruleName = Review.Rule.errorRuleName error
-                                        , filePath = Review.Rule.errorFilePath error
-                                        , details = Review.Rule.errorDetails error
-                                        , range = Review.Rule.errorRange error
-                                        }
-                                    )
-                                    nonemptyErrors
-                            , oldElmJson = originalElmJson
-                            , newElmJson = elmJson.raw
-                            }
-
-                    Nothing ->
-                        NoErrorsFounds
-
-            _ ->
+            else if List.any (\error -> Review.Rule.errorRuleName error == "Incorrect project") result.errors then
                 IncorrectProject
+
+            else
+                case ( elmJsonFixes, Review.Project.elmJson projectWithDependencies ) of
+                    ( ( error, fixes ) :: _, Just elmJson ) ->
+                        case Review.Fix.fix (Review.Rule.errorTarget error) fixes elmJson.raw of
+                            Review.Fix.Successful newRaw ->
+                                case Json.Decode.decodeString Elm.Project.decoder newRaw of
+                                    Ok elmJsonParsed ->
+                                        Review.Project.addElmJson
+                                            { elmJson | raw = newRaw, project = elmJsonParsed }
+                                            projectWithDependencies
+                                            |> runRule (stepsLeft - 1) originalElmJson rule projectData (error :: errors)
+
+                                    Err _ ->
+                                        FixFailed (Review.Fix.SourceCodeIsNotValid "elm.json is now an application")
+
+                            Review.Fix.Errored fixError ->
+                                FixFailed fixError
+
+                    ( [], Just elmJson ) ->
+                        case List.Nonempty.fromList errors of
+                            Just nonemptyErrors ->
+                                FoundErrors
+                                    { errors =
+                                        List.Nonempty.map
+                                            (\error ->
+                                                { message = Review.Rule.errorMessage error
+                                                , ruleName = Review.Rule.errorRuleName error
+                                                , filePath = Review.Rule.errorFilePath error
+                                                , details = Review.Rule.errorDetails error
+                                                , range = Review.Rule.errorRange error
+                                                }
+                                            )
+                                            nonemptyErrors
+                                    , oldElmJson = originalElmJson
+                                    , newElmJson = elmJson.raw
+                                    }
+
+                            Nothing ->
+                                NoErrorsFounds
+
+                    _ ->
+                        IncorrectProject
 
 
 updateFromFrontend : SessionId -> ClientId -> ToBackend -> BackendModel -> ( BackendModel, Cmd BackendMsg )
@@ -1125,6 +1160,54 @@ updateFromFrontend sessionId clientId msg model =
 
                             Just ( version, FetchedCheckedAndPullRequestFailed latestPackage _ ) ->
                                 createPullRequestAndUpdate packageName version latestPackage.result owner repo model
+
+                            _ ->
+                                ( model, Cmd.none )
+
+                    _ ->
+                        ( model, Cmd.none )
+                )
+
+        RerunPackageRequest packageName version ->
+            authenticate
+                (case Dict.get (Elm.Package.toString packageName) model.cachedPackages of
+                    Just packageVersions ->
+                        case AssocList.get version packageVersions of
+                            Just (FetchedAndChecked packageData) ->
+                                case PackageStatus.getRunRuleResult packageData.result of
+                                    Just (ParsingError _) ->
+                                        ( model
+                                        , getPackageEndpoint
+                                            (Elm.Package.toString packageData.elmJson.name)
+                                            packageData.elmJson.version
+                                            |> Task.andThen getPackageZip
+                                            |> Task.andThen
+                                                (\bytes ->
+                                                    case Zip.fromBytes bytes of
+                                                        Just zip ->
+                                                            let
+                                                                result : RunRuleResult
+                                                                result =
+                                                                    checkPackage packageData.elmJson model.cachedPackages zip
+                                                            in
+                                                            RuleErrors result |> Task.succeed
+
+                                                        Nothing ->
+                                                            Task.succeed CouldNotOpenDefaultBranchZip
+                                                )
+                                            |> Task.onError (HttpError >> Task.succeed)
+                                            |> Task.perform
+                                                (ReranPackage
+                                                    { elmJson = packageData.elmJson
+                                                    , docs = packageData.docs
+                                                    , packageName = packageName
+                                                    , updateIndex = packageData.updateIndex
+                                                    }
+                                                )
+                                        )
+
+                                    _ ->
+                                        ( model, Cmd.none )
 
                             _ ->
                                 ( model, Cmd.none )

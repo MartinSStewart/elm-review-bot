@@ -84,7 +84,7 @@ type ReviewResult
 
 
 type RunRuleResult
-    = ParsingError
+    = ParsingError (Nonempty String)
     | IncorrectProject
     | FixFailed Review.Fix.Problem
     | NotEnoughIterations
