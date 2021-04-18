@@ -665,7 +665,7 @@ pullRequestMessage changeCount onlyTestDependencies =
                 " After this gets merged, I recommend publishing a new release, unless you are working on something else in the meantime.\n"
            )
         ++ """
-I found this issue using [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/) and the [NoUnused.Dependencies](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/NoUnused-Dependencies) rule from [`jfmengels/elm-review-unused` package](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/). You can re-create my findings by running this command:
+I found this issue using [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/) and the [NoUnused.Dependencies](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/NoUnused-Dependencies) rule from [`jfmengels/elm-review-unused`](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/). You can re-create my findings by running this command:
 
 ```bash
 npx elm-review --template jfmengels/elm-review-unused/example --rules NoUnused.Dependencies
