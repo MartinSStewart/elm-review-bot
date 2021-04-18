@@ -1142,7 +1142,7 @@ updateFromFrontend sessionId clientId msg model =
                                                     (\{ defaultBranch } ->
                                                         createPullRequest
                                                             (List.Nonempty.length errors)
-                                                            (List.Nonempty.any (.message >> String.startsWith "Unused test dependency ") errors)
+                                                            (List.Nonempty.all (.message >> String.startsWith "Unused test dependency ") errors)
                                                             newElmJson
                                                             owner
                                                             repo
