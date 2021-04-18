@@ -18,7 +18,7 @@ import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
-import PackageStatus exposing (PackageStatus(..), ReviewResult(..), RunRuleResult(..))
+import PackageStatus exposing (FoundErrors_, PackageStatus(..), ReviewResult(..), RunRuleResult(..))
 import Parser exposing ((|.), (|=), Parser)
 import Process
 import Review.Fix
@@ -1117,43 +1117,14 @@ updateFromFrontend sessionId clientId msg model =
                         case AssocList.toList packageVersions |> List.maximumBy (Tuple.first >> Version.toTuple) of
                             Just ( version, FetchedAndChecked latestPackage ) ->
                                 case PackageStatus.getRunRuleResult latestPackage.result of
-                                    Just (FoundErrors ({ errors, newElmJson } as foundErrors)) ->
-                                        ( { model
-                                            | cachedPackages =
-                                                Dict.update
-                                                    (Elm.Package.toString packageName)
-                                                    (\maybePackages ->
-                                                        case maybePackages of
-                                                            Just packages ->
-                                                                AssocList.update version
-                                                                    (Maybe.map (PackageStatus.pullRequestPending foundErrors))
-                                                                    packages
-                                                                    |> Just
-
-                                                            Nothing ->
-                                                                Nothing
-                                                    )
-                                                    model.cachedPackages
-                                          }
-                                        , Cmd.batch
-                                            [ Github.getRepository
-                                                { authToken = Env.githubAuth, repo = repo, owner = owner }
-                                                |> Task.andThen
-                                                    (\{ defaultBranch } ->
-                                                        createPullRequest
-                                                            (List.Nonempty.length errors)
-                                                            (List.Nonempty.all (.message >> String.startsWith "Unused test dependency ") errors)
-                                                            newElmJson
-                                                            owner
-                                                            repo
-                                                            defaultBranch
-                                                    )
-                                                |> Task.attempt (CreatePullRequestResult packageName version)
-                                            ]
-                                        )
+                                    Just (FoundErrors foundErrors) ->
+                                        createPullRequestAndUpdate packageName version foundErrors owner repo model
 
                                     _ ->
                                         ( model, Cmd.none )
+
+                            Just ( version, FetchedCheckedAndPullRequestFailed latestPackage _ ) ->
+                                createPullRequestAndUpdate packageName version latestPackage.result owner repo model
 
                             _ ->
                                 ( model, Cmd.none )
@@ -1161,3 +1132,47 @@ updateFromFrontend sessionId clientId msg model =
                     _ ->
                         ( model, Cmd.none )
                 )
+
+
+createPullRequestAndUpdate :
+    Elm.Package.Name
+    -> Version
+    -> FoundErrors_
+    -> Github.Owner
+    -> String
+    -> BackendModel
+    -> ( BackendModel, Cmd BackendMsg )
+createPullRequestAndUpdate packageName version ({ errors, newElmJson } as foundErrors) owner repo model =
+    ( { model
+        | cachedPackages =
+            Dict.update
+                (Elm.Package.toString packageName)
+                (\maybePackages ->
+                    case maybePackages of
+                        Just packages ->
+                            AssocList.update version
+                                (Maybe.map (PackageStatus.pullRequestPending foundErrors))
+                                packages
+                                |> Just
+
+                        Nothing ->
+                            Nothing
+                )
+                model.cachedPackages
+      }
+    , Cmd.batch
+        [ Github.getRepository
+            { authToken = Env.githubAuth, repo = repo, owner = owner }
+            |> Task.andThen
+                (\{ defaultBranch } ->
+                    createPullRequest
+                        (List.Nonempty.length errors)
+                        (List.Nonempty.all (.message >> String.startsWith "Unused test dependency ") errors)
+                        newElmJson
+                        owner
+                        repo
+                        defaultBranch
+                )
+            |> Task.attempt (CreatePullRequestResult packageName version)
+        ]
+    )

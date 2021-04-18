@@ -65,8 +65,12 @@ pullRequestPending : FoundErrors_ -> PackageStatus -> PackageStatus
 pullRequestPending foundErrors_ packageStatus =
     case packageStatus of
         FetchedAndChecked fetchedAndChecked_ ->
-            FetchedCheckedAndPullRequestPending
-                (mapFetchedAndChecked (always foundErrors_) fetchedAndChecked_)
+            mapFetchedAndChecked (always foundErrors_) fetchedAndChecked_
+                |> FetchedCheckedAndPullRequestPending
+
+        FetchedCheckedAndPullRequestFailed fetchedAndChecked_ _ ->
+            mapFetchedAndChecked (always foundErrors_) fetchedAndChecked_
+                |> FetchedCheckedAndPullRequestPending
 
         _ ->
             packageStatus

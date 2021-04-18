@@ -320,7 +320,8 @@ packageView count packageName status =
                         [ Element.text "Pull request sent" ]
 
                     FetchedCheckedAndPullRequestFailed_ { error } ->
-                        [ Element.el
+                        [ createPullRequestButton False packageName
+                        , Element.el
                             [ errorColor ]
                             (Element.text <| "Pull request failed: " ++ httpErrorToString error)
                         ]
@@ -329,15 +330,25 @@ packageView count packageName status =
     )
 
 
+createPullRequestButton : Bool -> Elm.Package.Name -> Element FrontendMsg
+createPullRequestButton firstAttempt packageName =
+    Element.Input.button
+        buttonAttributes
+        { onPress = PressedCreatePullRequest packageName |> Just
+        , label =
+            if firstAttempt then
+                Element.text "Create pull request"
+
+            else
+                Element.text "Try again with pull request"
+        }
+
+
 showRuleResult : Elm.Package.Name -> RunRuleResult -> Element FrontendMsg
 showRuleResult packageName ruleResult =
     case ruleResult of
         FoundErrors { errors, oldElmJson, newElmJson } ->
-            Element.Input.button
-                buttonAttributes
-                { onPress = PressedCreatePullRequest packageName |> Just
-                , label = Element.text "Create pull request"
-                }
+            createPullRequestButton True packageName
                 :: List.map
                     (\{ ruleName, message } ->
                         Element.paragraph
