@@ -576,8 +576,8 @@ ownerAndRepo packageName =
             ( Github.owner "", "" )
 
 
-createPullRequest : Int -> String -> Github.Owner -> String -> String -> Task Http.Error { url : String }
-createPullRequest changeCount elmJsonContent originalOwner originalRepo branchName =
+createPullRequest : Int -> Bool -> String -> Github.Owner -> String -> String -> Task Http.Error { url : String }
+createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner originalRepo branchName =
     Github.createFork
         { authToken = Env.githubAuth, owner = originalOwner, repo = originalRepo }
         |> Task.andThen
@@ -643,26 +643,32 @@ createPullRequest changeCount elmJsonContent originalOwner originalRepo branchNa
                                 , destinationBranch = branchName
                                 , sourceBranch = branchName
                                 , title = "Remove unused dependencies"
-                                , description = pullRequestMessage changeCount
+                                , description = pullRequestMessage changeCount onlyTestDependencies
                                 }
                         )
             )
 
 
-pullRequestMessage : Int -> String
-pullRequestMessage changeCount =
+pullRequestMessage : Int -> Bool -> String
+pullRequestMessage changeCount onlyTestDependencies =
     "Hello :wave:!\n\n"
         ++ (if changeCount == 1 then
-                "I noticed an unused dependency in your package. Here is a pull request to remove it. After this gets merged, I recommend publishing a new release, unless you are working on something else in the meantime.\n"
+                "I noticed an unused dependency in your package. Here is a pull request to remove it."
 
             else
-                "I noticed there were unused dependencies in your package. Here is a pull request to remove them. After this gets merged, I recommend publishing a new release, unless you are working on something else in the meantime.\n"
+                "I noticed there were unused dependencies in your package. Here is a pull request to remove them."
+           )
+        ++ (if onlyTestDependencies then
+                "\n"
+
+            else
+                " After this gets merged, I recommend publishing a new release, unless you are working on something else in the meantime.\n"
            )
         ++ """
-I found this issue using [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/) and the [`jfmengels/elm-review-unused` package](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/). You can re-create my findings by running this command:
+I found this issue using [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/) and the [NoUnused.Dependencies](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/NoUnused-Dependencies) rule from [`jfmengels/elm-review-unused` package](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/). You can re-create my findings by running this command:
 
 ```bash
-npx elm-review --template jfmengels/elm-review-unused/example --rules NoUnused.Dependency
+npx elm-review --template jfmengels/elm-review-unused/example --rules NoUnused.Dependencies
 ```
 
 If you like these findings and want to find more dead code in your code, you can add `elm-review` to your project like this:
@@ -675,7 +681,7 @@ npx elm-review --fix # fixes the issue.
 ```
 More information on how to get started in the [`elm-review` documentation](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/), and you can read more about [how dead code removal](https://jfmengels.net/safe-dead-code-removal/) is done using this tool.
 
-Note that this pull request was made automatically (by @MartinSStewart). If you so wish, you can tell me to stop making pull requests like this by writing "please stop".
+This pull request was made automatically (by @MartinSStewart). You can tell me to stop making pull requests like this by writing "please stop".
 
 Have a nice day!"""
 
@@ -1136,6 +1142,7 @@ updateFromFrontend sessionId clientId msg model =
                                                     (\{ defaultBranch } ->
                                                         createPullRequest
                                                             (List.Nonempty.length errors)
+                                                            (List.Nonempty.any (.message >> String.startsWith "Unused test dependency ") errors)
                                                             newElmJson
                                                             owner
                                                             repo

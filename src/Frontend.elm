@@ -160,20 +160,21 @@ updateFromBackend msg model =
             )
 
 
-resetBackendButton =
-    Element.Input.button
-        buttonAttributes
-        { onPress = Just PressedResetBackend
-        , label = Element.text "Reset backend"
-        }
 
-
-resetRuleButton =
-    Element.Input.button
-        buttonAttributes
-        { onPress = Just PressedResetRules
-        , label = Element.text "Reset rules"
-        }
+--resetBackendButton =
+--    Element.Input.button
+--        buttonAttributes
+--        { onPress = Just PressedResetBackend
+--        , label = Element.text "Reset backend"
+--        }
+--
+--
+--resetRuleButton =
+--    Element.Input.button
+--        buttonAttributes
+--        { onPress = Just PressedResetRules
+--        , label = Element.text "Reset rules"
+--        }
 
 
 buttonAttributes =
@@ -221,8 +222,9 @@ view model =
                                         , label = Element.text "Show requested order"
                                         }
                             , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
-                            , resetBackendButton
-                            , resetRuleButton
+
+                            --, resetBackendButton
+                            --, resetRuleButton
                             ]
                         , packagesView model
                         ]
@@ -274,17 +276,21 @@ packagesView model =
 
 packageView : Int -> Elm.Package.Name -> PackageStatusFrontend -> ( PackageStatusFrontend, Elm.Package.Name, Element FrontendMsg )
 packageView count packageName status =
+    let
+        packageVersionText =
+            Elm.Version.toString (Types.packageVersion_ status)
+    in
     ( status
     , packageName
     , Element.column
         []
-        (Element.text
-            (Elm.Package.toString packageName
-                ++ " "
-                ++ Elm.Version.toString (Types.packageVersion_ status)
-                ++ " total: "
-                ++ String.fromInt count
-            )
+        (Element.paragraph []
+            [ Element.newTabLink [ Element.Font.color <| Element.rgb 0 0 1 ]
+                { url = "https://github.com/" ++ Elm.Package.toString packageName ++ "/tree/" ++ packageVersionText
+                , label = Element.text (Elm.Package.toString packageName ++ " " ++ packageVersionText)
+                }
+            , Element.text (" total: " ++ String.fromInt count)
+            ]
             :: (case status of
                     Fetched_ _ ->
                         [ Element.text "Fetched" ]
