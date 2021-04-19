@@ -16,7 +16,7 @@ import Url exposing (Url)
 
 
 type alias FrontendModel =
-    { state : Dict String (List PackageStatusFrontend)
+    { state : Dict String (AssocList.Dict Version PackageStatusFrontend)
     , key : Key
     , order : DisplayOrder
     , loginStatus : LoginStatus
@@ -35,27 +35,22 @@ type DisplayOrder
 
 type PackageStatusFrontend
     = Fetched_
-        { version : Version
-        , updateIndex : Int
+        { updateIndex : Int
         }
     | FetchedAndChecked_
-        { version : Version
-        , updateIndex : Int
+        { updateIndex : Int
         , result : ReviewResult
         }
     | FetchingElmJsonAndDocsFailed_ Version Int Http.Error
     | FetchedCheckedAndPullRequestPending_
-        { version : Version
-        , updateIndex : Int
+        { updateIndex : Int
         }
     | FetchedCheckedAndPullRequestSent_
-        { version : Version
-        , updateIndex : Int
+        { updateIndex : Int
         , url : String
         }
     | FetchedCheckedAndPullRequestFailed_
-        { version : Version
-        , updateIndex : Int
+        { updateIndex : Int
         , error : Http.Error
         }
 
@@ -67,12 +62,11 @@ statusToStatusFrontend packageStatus =
             Nothing
 
         Fetched a ->
-            Fetched_ { version = a.elmJson.version, updateIndex = a.updateIndex } |> Just
+            Fetched_ { updateIndex = a.updateIndex } |> Just
 
         FetchedAndChecked a ->
             FetchedAndChecked_
-                { version = a.elmJson.version
-                , updateIndex = a.updateIndex
+                { updateIndex = a.updateIndex
                 , result = a.result
                 }
                 |> Just
@@ -82,23 +76,20 @@ statusToStatusFrontend packageStatus =
 
         FetchedCheckedAndPullRequestPending a ->
             FetchedCheckedAndPullRequestPending_
-                { version = a.elmJson.version
-                , updateIndex = a.updateIndex
+                { updateIndex = a.updateIndex
                 }
                 |> Just
 
         FetchedCheckedAndPullRequestSent a { url } ->
             FetchedCheckedAndPullRequestSent_
-                { version = a.elmJson.version
-                , updateIndex = a.updateIndex
+                { updateIndex = a.updateIndex
                 , url = url
                 }
                 |> Just
 
         FetchedCheckedAndPullRequestFailed a error ->
             FetchedCheckedAndPullRequestFailed_
-                { version = a.elmJson.version
-                , updateIndex = a.updateIndex
+                { updateIndex = a.updateIndex
                 , error = error
                 }
                 |> Just
@@ -127,28 +118,6 @@ packageVersion packageStatus =
 
         FetchedCheckedAndPullRequestFailed fetchedAndChecked_ _ ->
             fetchedAndChecked_.elmJson.version
-
-
-packageVersion_ : PackageStatusFrontend -> Version
-packageVersion_ packageStatus =
-    case packageStatus of
-        Fetched_ { version } ->
-            version
-
-        FetchedAndChecked_ { version } ->
-            version
-
-        FetchingElmJsonAndDocsFailed_ version _ _ ->
-            version
-
-        FetchedCheckedAndPullRequestPending_ { version } ->
-            version
-
-        FetchedCheckedAndPullRequestSent_ { version } ->
-            version
-
-        FetchedCheckedAndPullRequestFailed_ { version } ->
-            version
 
 
 updateIndex : PackageStatusFrontend -> Int
@@ -185,7 +154,6 @@ type FrontendMsg
     | UrlChanged Url
     | ToggleOrder
     | PressedResetBackend
-    | PressedResetRules
     | NoOpFrontendMsg
     | PressedLogin
     | TypedPassword String
@@ -227,7 +195,7 @@ type BackendMsg
 
 
 type ToFrontend
-    = Updates (Dict String (List PackageStatusFrontend))
+    = Updates (Dict String (AssocList.Dict Version PackageStatusFrontend))
 
 
 type alias PackageEndpoint =

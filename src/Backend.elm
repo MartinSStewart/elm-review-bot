@@ -469,7 +469,13 @@ sendChange clients packageName packageStatus =
                 (Updates
                     (Dict.singleton
                         (Elm.Package.toString packageName)
-                        (List.filterMap Types.statusToStatusFrontend [ packageStatus ])
+                        (case Types.statusToStatusFrontend packageStatus of
+                            Just frontendPackageStatus ->
+                                AssocList.singleton (Types.packageVersion packageStatus) frontendPackageStatus
+
+                            Nothing ->
+                                AssocList.empty
+                        )
                     )
                 )
         )
@@ -478,7 +484,16 @@ sendChange clients packageName packageStatus =
 
 sendUpdates : ClientId -> BackendModel -> Cmd backendMsg
 sendUpdates clientId model =
-    Dict.map (\_ value -> AssocList.values value |> List.filterMap Types.statusToStatusFrontend) model.cachedPackages
+    Dict.map
+        (\_ value ->
+            AssocList.toList value
+                |> List.filterMap
+                    (\( key, packageStatus ) ->
+                        Types.statusToStatusFrontend packageStatus |> Maybe.map (Tuple.pair key)
+                    )
+                |> AssocList.fromList
+        )
+        model.cachedPackages
         |> Updates
         |> Lamdera.sendToFrontend clientId
 

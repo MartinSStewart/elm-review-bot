@@ -1,5 +1,6 @@
 module Frontend exposing (..)
 
+import AssocList
 import Browser exposing (UrlRequest(..))
 import Browser.Navigation as Nav
 import Dict
@@ -80,40 +81,6 @@ update msg model =
         PressedResetBackend ->
             ( { model | state = Dict.empty }, Lamdera.sendToBackend ResetBackend )
 
-        PressedResetRules ->
-            ( { model
-                | state =
-                    Dict.map
-                        (\_ versions ->
-                            List.filterMap
-                                (\packageStatus ->
-                                    case packageStatus of
-                                        Fetched_ data ->
-                                            Fetched_ data |> Just
-
-                                        FetchedAndChecked_ { version, updateIndex } ->
-                                            Fetched_ { version = version, updateIndex = updateIndex }
-                                                |> Just
-
-                                        FetchingElmJsonAndDocsFailed_ _ _ _ ->
-                                            Nothing
-
-                                        FetchedCheckedAndPullRequestPending_ _ ->
-                                            Nothing
-
-                                        FetchedCheckedAndPullRequestSent_ _ ->
-                                            Nothing
-
-                                        FetchedCheckedAndPullRequestFailed_ _ ->
-                                            Nothing
-                                )
-                                versions
-                        )
-                        model.state
-              }
-            , Lamdera.sendToBackend ResetRules
-            )
-
         PressedLogin ->
             ( model
             , case model.loginStatus of
@@ -152,7 +119,7 @@ updateFromBackend msg model =
                 | state =
                     Dict.merge
                         (\_ _ state -> state)
-                        (\key a new state -> Dict.insert key (a ++ new) state)
+                        (\key a new state -> Dict.insert key (AssocList.union new a) state)
                         (\key new state -> Dict.insert key new state)
                         model.state
                         dict
@@ -245,7 +212,14 @@ packagesView model =
                 (\( packageName, versions ) ->
                     case Elm.Package.fromString packageName of
                         Just packageName_ ->
-                            case List.maximumBy Types.updateIndex versions |> Maybe.map (packageView (List.length versions) packageName_) of
+                            case
+                                AssocList.toList versions
+                                    |> List.maximumBy (Tuple.second >> Types.updateIndex)
+                                    |> Maybe.map
+                                        (\( version, packageStatus ) ->
+                                            packageView (AssocList.size versions) packageName_ version packageStatus
+                                        )
+                            of
                                 Just a ->
                                     [ a ]
 
@@ -257,14 +231,14 @@ packagesView model =
                 )
             |> (case model.order of
                     RequestOrder ->
-                        List.sortBy (\( a, _, _ ) -> Types.updateIndex a)
+                        List.sortBy (\{ status } -> Types.updateIndex status)
 
                     Alphabetical ->
                         List.sortWith
-                            (\( b0, a0, _ ) ( b1, a1, _ ) ->
-                                case compare (Elm.Package.toString a0) (Elm.Package.toString a1) of
+                            (\a b ->
+                                case compare (Elm.Package.toString a.name) (Elm.Package.toString b.name) of
                                     EQ ->
-                                        Elm.Version.compare (Types.packageVersion_ b0) (Types.packageVersion_ b1)
+                                        Elm.Version.compare a.version b.version
 
                                     LT ->
                                         LT
@@ -273,64 +247,71 @@ packagesView model =
                                         GT
                             )
                )
-            |> List.map (\( _, _, a ) -> a)
+            |> List.map (\a -> a.view)
         )
 
 
-packageView : Int -> Elm.Package.Name -> PackageStatusFrontend -> ( PackageStatusFrontend, Elm.Package.Name, Element FrontendMsg )
-packageView count packageName status =
+packageView :
+    Int
+    -> Elm.Package.Name
+    -> Elm.Version.Version
+    -> PackageStatusFrontend
+    -> { version : Elm.Version.Version, name : Elm.Package.Name, view : Element FrontendMsg, status : PackageStatusFrontend }
+packageView count packageName version status =
     let
         packageVersionText =
-            Elm.Version.toString (Types.packageVersion_ status)
+            Elm.Version.toString version
     in
-    ( status
-    , packageName
-    , Element.column
-        []
-        (Element.paragraph []
-            [ Element.newTabLink [ Element.Font.color <| Element.rgb 0 0 1 ]
-                { url = "https://github.com/" ++ Elm.Package.toString packageName ++ "/tree/" ++ packageVersionText
-                , label = Element.text (Elm.Package.toString packageName ++ " " ++ packageVersionText)
-                }
-            , Element.text (" total: " ++ String.fromInt count)
-            ]
-            :: (case status of
-                    Fetched_ _ ->
-                        [ Element.text "Fetched" ]
+    { version = version
+    , name = packageName
+    , status = status
+    , view =
+        Element.column
+            []
+            (Element.paragraph []
+                [ Element.newTabLink [ Element.Font.color <| Element.rgb 0 0 1 ]
+                    { url = "https://github.com/" ++ Elm.Package.toString packageName ++ "/tree/" ++ packageVersionText
+                    , label = Element.text (Elm.Package.toString packageName ++ " " ++ packageVersionText)
+                    }
+                , Element.text (" total: " ++ String.fromInt count)
+                ]
+                :: (case status of
+                        Fetched_ _ ->
+                            [ Element.text "Fetched" ]
 
-                    FetchedAndChecked_ { result } ->
-                        [ case result of
-                            HttpError httpError ->
-                                Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
+                        FetchedAndChecked_ { result } ->
+                            [ case result of
+                                HttpError httpError ->
+                                    Element.el [ errorColor ] (Element.text (httpErrorToString httpError))
 
-                            CouldNotOpenDefaultBranchZip ->
-                                Element.el [ errorColor ] (Element.text "CouldNotOpenDefaultBranchZip")
+                                CouldNotOpenDefaultBranchZip ->
+                                    Element.el [ errorColor ] (Element.text "CouldNotOpenDefaultBranchZip")
 
-                            PackageTagNotFound ->
-                                Element.el [ errorColor ] (Element.text "PackageTagNotFound")
+                                PackageTagNotFound ->
+                                    Element.el [ errorColor ] (Element.text "PackageTagNotFound")
 
-                            RuleErrors runRuleResult ->
-                                showRuleResult packageName (Types.packageVersion_ status) runRuleResult
-                        ]
+                                RuleErrors runRuleResult ->
+                                    showRuleResult packageName version runRuleResult
+                            ]
 
-                    FetchingElmJsonAndDocsFailed_ _ _ _ ->
-                        [ Element.text "FetchingElmJsonAndDocsFailed" |> Element.el [ errorColor ] ]
+                        FetchingElmJsonAndDocsFailed_ _ _ _ ->
+                            [ Element.text "FetchingElmJsonAndDocsFailed" |> Element.el [ errorColor ] ]
 
-                    FetchedCheckedAndPullRequestPending_ _ ->
-                        [ Element.text "Pull request pending" ]
+                        FetchedCheckedAndPullRequestPending_ _ ->
+                            [ Element.text "Pull request pending" ]
 
-                    FetchedCheckedAndPullRequestSent_ _ ->
-                        [ Element.text "Pull request sent" ]
+                        FetchedCheckedAndPullRequestSent_ _ ->
+                            [ Element.text "Pull request sent" ]
 
-                    FetchedCheckedAndPullRequestFailed_ { error } ->
-                        [ createPullRequestButton False packageName
-                        , Element.el
-                            [ errorColor ]
-                            (Element.text <| "Pull request failed: " ++ httpErrorToString error)
-                        ]
-               )
-        )
-    )
+                        FetchedCheckedAndPullRequestFailed_ { error } ->
+                            [ createPullRequestButton False packageName
+                            , Element.el
+                                [ errorColor ]
+                                (Element.text <| "Pull request failed: " ++ httpErrorToString error)
+                            ]
+                   )
+            )
+    }
 
 
 createPullRequestButton : Bool -> Elm.Package.Name -> Element FrontendMsg
