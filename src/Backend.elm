@@ -611,10 +611,11 @@ ownerAndRepo packageName =
             ( Github.owner "", "" )
 
 
-createPullRequest : Int -> Bool -> String -> Github.Owner -> String -> String -> Task Http.Error { url : String }
+createPullRequest : Int -> Bool -> String -> Github.Owner -> String -> String -> Task ( String, Http.Error ) { url : String }
 createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner originalRepo branchName =
     Github.createFork
         { authToken = Env.githubAuth, owner = originalOwner, repo = originalRepo }
+        |> Task.mapError (Tuple.pair "createFork")
         |> Task.andThen
             (\fork ->
                 Github.getBranch
@@ -623,6 +624,7 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                     , owner = fork.owner
                     , branchName = branchName
                     }
+                    |> Task.mapError (Tuple.pair "getBranch")
                     |> Task.andThen
                         (\commitSha ->
                             Github.getCommit
@@ -631,6 +633,7 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                                 , owner = fork.owner
                                 , sha = commitSha
                                 }
+                                |> Task.mapError (Tuple.pair "getCommit")
                                 |> Task.andThen
                                     (\treeSha ->
                                         delayTask
@@ -646,6 +649,7 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                                                 , baseTree = Just treeSha
                                                 }
                                             )
+                                            |> Task.mapError (Tuple.pair "createTree")
                                             |> Task.andThen
                                                 (\tree ->
                                                     delayTask
@@ -658,6 +662,7 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                                                             , parents = [ commitSha ]
                                                             }
                                                         )
+                                                        |> Task.mapError (Tuple.pair "createCommit")
                                                 )
                                     )
                         )
@@ -673,6 +678,7 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                                     , force = False
                                     }
                                 )
+                                |> Task.mapError (Tuple.pair "updateBranch")
                         )
                     |> Task.andThen
                         (\_ ->
@@ -688,6 +694,7 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                                     , description = pullRequestMessage changeCount onlyTestDependencies
                                     }
                                 )
+                                |> Task.mapError (Tuple.pair "createPullRequest")
                         )
             )
 
@@ -1276,6 +1283,7 @@ createPullRequestAndUpdate packageName version ({ errors, newElmJson } as foundE
     , Cmd.batch
         [ Github.getRepository
             { authToken = Env.githubAuth, repo = repo, owner = owner }
+            |> Task.mapError (Tuple.pair "getRepository")
             |> Task.andThen
                 (\{ defaultBranch } ->
                     createPullRequest

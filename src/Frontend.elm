@@ -307,7 +307,12 @@ packageView count packageName version status =
                             [ createPullRequestButton False packageName
                             , Element.el
                                 [ errorColor ]
-                                (Element.text <| "Pull request failed: " ++ httpErrorToString error)
+                                (Element.text <|
+                                    "Pull request error: "
+                                        ++ Tuple.first error
+                                        ++ " failed with "
+                                        ++ httpErrorToString (Tuple.second error)
+                                )
                             ]
                    )
             )
@@ -400,22 +405,23 @@ showRuleResult packageName version ruleResult =
                 ]
 
 
+httpErrorToString : Http.Error -> String
 httpErrorToString error =
     case error of
         Http.BadBody text ->
             text
 
         Http.BadUrl url ->
-            "Invalid url " ++ url
+            "invalid url " ++ url
 
         Http.Timeout ->
-            "Timed out"
+            "timed out"
 
         Http.NetworkError ->
-            "Network error"
+            "network error"
 
         Http.BadStatus statusCode ->
-            "Bad status code  " ++ String.fromInt statusCode
+            "nad status code " ++ String.fromInt statusCode
 
 
 errorColor =

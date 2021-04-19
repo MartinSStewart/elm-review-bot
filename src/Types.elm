@@ -51,7 +51,7 @@ type PackageStatusFrontend
         }
     | FetchedCheckedAndPullRequestFailed_
         { updateIndex : Int
-        , error : Http.Error
+        , error : ( String, Http.Error )
         }
 
 
@@ -184,7 +184,7 @@ type BackendMsg
         ReviewResult
     | ClientConnected SessionId ClientId
     | ClientDisconnected SessionId ClientId
-    | CreatePullRequestResult Elm.Package.Name Version (Result Http.Error { url : String })
+    | CreatePullRequestResult Elm.Package.Name Version (Result ( String, Http.Error ) { url : String })
     | ReranPackage
         { packageName : Elm.Package.Name
         , elmJson : Elm.Project.PackageInfo

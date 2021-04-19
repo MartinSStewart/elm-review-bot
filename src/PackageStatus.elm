@@ -37,7 +37,7 @@ type PackageStatus
     | FetchedAndChecked (FetchedAndChecked_ ReviewResult)
     | FetchedCheckedAndPullRequestPending (FetchedAndChecked_ FoundErrors_)
     | FetchedCheckedAndPullRequestSent (FetchedAndChecked_ FoundErrors_) { url : String }
-    | FetchedCheckedAndPullRequestFailed (FetchedAndChecked_ FoundErrors_) Http.Error
+    | FetchedCheckedAndPullRequestFailed (FetchedAndChecked_ FoundErrors_) ( String, Http.Error )
     | FetchingElmJsonAndDocsFailed Version Int Http.Error
 
 
@@ -51,7 +51,7 @@ pullRequestSent pullRequest packageStatus =
             packageStatus
 
 
-pullRequestFailed : Http.Error -> PackageStatus -> PackageStatus
+pullRequestFailed : ( String, Http.Error ) -> PackageStatus -> PackageStatus
 pullRequestFailed error packageStatus =
     case packageStatus of
         FetchedCheckedAndPullRequestPending fetchedAndChecked_ ->
