@@ -6,7 +6,7 @@ module Github exposing
     , getFileContents, updateFileContents
     , createFork
     , getComments, createComment
-    , Owner, ShaHash, createTree, getBranchZip, getCommitZip, getRepository, getTag, owner, ownerToString, sha, shaToString, updateBranch
+    , CommitSha, Owner, ShaHash, TreeSha, createTree, getBranchZip, getCommitZip, getRepository, getTag, owner, ownerToString, sha, shaToString, updateBranch
     )
 
 {-|

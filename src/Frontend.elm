@@ -421,7 +421,7 @@ httpErrorToString error =
             "network error"
 
         Http.BadStatus statusCode ->
-            "nad status code " ++ String.fromInt statusCode
+            "bad status code " ++ String.fromInt statusCode
 
 
 errorColor =

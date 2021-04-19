@@ -611,6 +611,34 @@ ownerAndRepo packageName =
             ( Github.owner "", "" )
 
 
+retryGetBranch :
+    Int
+    -> { a | repo : String, owner : Github.Owner }
+    -> String
+    -> Task Http.Error (Github.ShaHash Github.CommitSha)
+retryGetBranch attemptsLeft fork branchName =
+    Github.getBranch
+        { authToken = Env.githubAuth
+        , repo = fork.repo
+        , owner = fork.owner
+        , branchName = branchName
+        }
+        |> Task.onError
+            (\error ->
+                case error of
+                    Http.BadStatus 409 ->
+                        if attemptsLeft > 0 then
+                            Process.sleep 1000
+                                |> Task.andThen (\() -> retryGetBranch (attemptsLeft - 1) fork branchName)
+
+                        else
+                            Task.fail error
+
+                    _ ->
+                        Task.fail error
+            )
+
+
 createPullRequest : Int -> Bool -> String -> Github.Owner -> String -> String -> Task ( String, Http.Error ) { url : String }
 createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner originalRepo branchName =
     Github.createFork
@@ -618,12 +646,7 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
         |> Task.mapError (Tuple.pair "createFork")
         |> Task.andThen
             (\fork ->
-                Github.getBranch
-                    { authToken = Env.githubAuth
-                    , repo = fork.repo
-                    , owner = fork.owner
-                    , branchName = branchName
-                    }
+                retryGetBranch 2 fork branchName
                     |> Task.mapError (Tuple.pair "getBranch")
                     |> Task.andThen
                         (\commitSha ->
