@@ -636,74 +636,59 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                                 |> Task.mapError (Tuple.pair "getCommit")
                                 |> Task.andThen
                                     (\treeSha ->
-                                        delayTask
-                                            (Github.createTree
-                                                { authToken = Env.githubAuth
-                                                , owner = fork.owner
-                                                , repo = fork.repo
-                                                , treeNodes =
-                                                    [ { path = "elm.json"
-                                                      , content = elmJsonContent
-                                                      }
-                                                    ]
-                                                , baseTree = Just treeSha
-                                                }
-                                            )
+                                        Github.createTree
+                                            { authToken = Env.githubAuth
+                                            , owner = fork.owner
+                                            , repo = fork.repo
+                                            , treeNodes =
+                                                [ { path = "elm.json"
+                                                  , content = elmJsonContent
+                                                  }
+                                                ]
+                                            , baseTree = Just treeSha
+                                            }
                                             |> Task.mapError (Tuple.pair "createTree")
                                             |> Task.andThen
                                                 (\tree ->
-                                                    delayTask
-                                                        (Github.createCommit
-                                                            { authToken = Env.githubAuth
-                                                            , repo = fork.repo
-                                                            , owner = fork.owner
-                                                            , message = "Remove unused dependencies"
-                                                            , tree = tree.treeSha
-                                                            , parents = [ commitSha ]
-                                                            }
-                                                        )
+                                                    Github.createCommit
+                                                        { authToken = Env.githubAuth
+                                                        , repo = fork.repo
+                                                        , owner = fork.owner
+                                                        , message = "Remove unused dependencies"
+                                                        , tree = tree.treeSha
+                                                        , parents = [ commitSha ]
+                                                        }
                                                         |> Task.mapError (Tuple.pair "createCommit")
                                                 )
                                     )
                         )
                     |> Task.andThen
                         (\commitSha ->
-                            delayTask
-                                (Github.updateBranch
-                                    { authToken = Env.githubAuth
-                                    , owner = fork.owner
-                                    , repo = fork.repo
-                                    , branchName = branchName
-                                    , sha = commitSha
-                                    , force = False
-                                    }
-                                )
+                            Github.updateBranch
+                                { authToken = Env.githubAuth
+                                , owner = fork.owner
+                                , repo = fork.repo
+                                , branchName = branchName
+                                , sha = commitSha
+                                , force = False
+                                }
                                 |> Task.mapError (Tuple.pair "updateBranch")
                         )
                     |> Task.andThen
                         (\_ ->
-                            delayTask
-                                (Github.createPullRequest
-                                    { authToken = Env.githubAuth
-                                    , sourceBranchOwner = fork.owner
-                                    , destinationOwner = originalOwner
-                                    , destinationRepo = fork.repo
-                                    , destinationBranch = branchName
-                                    , sourceBranch = branchName
-                                    , title = "Remove unused dependencies"
-                                    , description = pullRequestMessage changeCount onlyTestDependencies
-                                    }
-                                )
+                            Github.createPullRequest
+                                { authToken = Env.githubAuth
+                                , sourceBranchOwner = fork.owner
+                                , destinationOwner = originalOwner
+                                , destinationRepo = fork.repo
+                                , destinationBranch = branchName
+                                , sourceBranch = branchName
+                                , title = "Remove unused dependencies"
+                                , description = pullRequestMessage changeCount onlyTestDependencies
+                                }
                                 |> Task.mapError (Tuple.pair "createPullRequest")
                         )
             )
-
-
-delayTask : Task e a -> Task e a
-delayTask task =
-    Task.andThen
-        (\() -> task)
-        (Process.sleep 1000)
 
 
 pullRequestMessage : Int -> Bool -> String
