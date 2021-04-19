@@ -618,55 +618,70 @@ createPullRequest changeCount onlyTestDependencies elmJsonContent originalOwner 
                                 }
                                 |> Task.andThen
                                     (\treeSha ->
-                                        Github.createTree
-                                            { authToken = Env.githubAuth
-                                            , owner = fork.owner
-                                            , repo = fork.repo
-                                            , treeNodes =
-                                                [ { path = "elm.json"
-                                                  , content = elmJsonContent
-                                                  }
-                                                ]
-                                            , baseTree = Just treeSha
-                                            }
+                                        delayTask
+                                            (Github.createTree
+                                                { authToken = Env.githubAuth
+                                                , owner = fork.owner
+                                                , repo = fork.repo
+                                                , treeNodes =
+                                                    [ { path = "elm.json"
+                                                      , content = elmJsonContent
+                                                      }
+                                                    ]
+                                                , baseTree = Just treeSha
+                                                }
+                                            )
                                             |> Task.andThen
                                                 (\tree ->
-                                                    Github.createCommit
-                                                        { authToken = Env.githubAuth
-                                                        , repo = fork.repo
-                                                        , owner = fork.owner
-                                                        , message = "Remove unused dependencies"
-                                                        , tree = tree.treeSha
-                                                        , parents = [ commitSha ]
-                                                        }
+                                                    delayTask
+                                                        (Github.createCommit
+                                                            { authToken = Env.githubAuth
+                                                            , repo = fork.repo
+                                                            , owner = fork.owner
+                                                            , message = "Remove unused dependencies"
+                                                            , tree = tree.treeSha
+                                                            , parents = [ commitSha ]
+                                                            }
+                                                        )
                                                 )
                                     )
                         )
                     |> Task.andThen
                         (\commitSha ->
-                            Github.updateBranch
-                                { authToken = Env.githubAuth
-                                , owner = fork.owner
-                                , repo = fork.repo
-                                , branchName = branchName
-                                , sha = commitSha
-                                , force = False
-                                }
+                            delayTask
+                                (Github.updateBranch
+                                    { authToken = Env.githubAuth
+                                    , owner = fork.owner
+                                    , repo = fork.repo
+                                    , branchName = branchName
+                                    , sha = commitSha
+                                    , force = False
+                                    }
+                                )
                         )
                     |> Task.andThen
                         (\_ ->
-                            Github.createPullRequest
-                                { authToken = Env.githubAuth
-                                , sourceBranchOwner = fork.owner
-                                , destinationOwner = originalOwner
-                                , destinationRepo = fork.repo
-                                , destinationBranch = branchName
-                                , sourceBranch = branchName
-                                , title = "Remove unused dependencies"
-                                , description = pullRequestMessage changeCount onlyTestDependencies
-                                }
+                            delayTask
+                                (Github.createPullRequest
+                                    { authToken = Env.githubAuth
+                                    , sourceBranchOwner = fork.owner
+                                    , destinationOwner = originalOwner
+                                    , destinationRepo = fork.repo
+                                    , destinationBranch = branchName
+                                    , sourceBranch = branchName
+                                    , title = "Remove unused dependencies"
+                                    , description = pullRequestMessage changeCount onlyTestDependencies
+                                    }
+                                )
                         )
             )
+
+
+delayTask : Task e a -> Task e a
+delayTask task =
+    Task.andThen
+        (\() -> task)
+        (Process.sleep 1000)
 
 
 pullRequestMessage : Int -> Bool -> String
