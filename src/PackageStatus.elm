@@ -83,6 +83,29 @@ type ReviewResult
     | RuleErrors RunRuleResult
 
 
+type ReviewResult_
+    = CouldNotOpenDefaultBranchZip_
+    | PackageTagNotFound_
+    | HttpError_ Http.Error
+    | RuleErrors_ Bool RunRuleResult
+
+
+convertReviewResult : ReviewResult_ -> ReviewResult
+convertReviewResult reviewResult_ =
+    case reviewResult_ of
+        CouldNotOpenDefaultBranchZip_ ->
+            CouldNotOpenDefaultBranchZip
+
+        PackageTagNotFound_ ->
+            PackageTagNotFound
+
+        HttpError_ error ->
+            HttpError error
+
+        RuleErrors_ _ runRuleResult ->
+            RuleErrors runRuleResult
+
+
 type RunRuleResult
     = ParsingError (Nonempty String)
     | IncorrectProject

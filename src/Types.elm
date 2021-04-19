@@ -10,7 +10,7 @@ import Elm.Project
 import Elm.Version exposing (Version)
 import Http
 import Lamdera exposing (ClientId, SessionId)
-import PackageStatus exposing (PackageStatus(..), ReviewResult)
+import PackageStatus exposing (PackageStatus(..), ReviewResult, ReviewResult_)
 import Set exposing (Set)
 import Url exposing (Url)
 
@@ -181,7 +181,7 @@ type BackendMsg
         , elmJson : Elm.Project.PackageInfo
         , docs : List Elm.Docs.Module
         }
-        ReviewResult
+        ReviewResult_
     | ClientConnected SessionId ClientId
     | ClientDisconnected SessionId ClientId
     | CreatePullRequestResult Elm.Package.Name Version (Result ( String, Http.Error ) { url : String })

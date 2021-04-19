@@ -18,7 +18,7 @@ import Lamdera exposing (ClientId, SessionId)
 import List.Extra as List
 import List.Nonempty
 import NoUnused.Dependencies
-import PackageStatus exposing (FoundErrors_, PackageStatus(..), ReviewResult(..), RunRuleResult(..))
+import PackageStatus exposing (FoundErrors_, PackageStatus(..), ReviewResult(..), ReviewResult_(..), RunRuleResult(..))
 import Parser exposing ((|.), (|=), Parser)
 import Process
 import Review.Fix
@@ -366,7 +366,7 @@ update msg model =
                         { updateIndex = model.updateIndex
                         , docs = docs
                         , elmJson = elmJson
-                        , result = result
+                        , result = PackageStatus.convertReviewResult result
                         }
 
                 model2 =
@@ -378,9 +378,24 @@ update msg model =
                                 model.cachedPackages
                         , updateIndex = model.updateIndex + 1
                     }
+
+                ( owner, repo ) =
+                    ownerAndRepo packageName
+
+                ( model3, cmd ) =
+                    case result of
+                        RuleErrors_ True (FoundErrors foundErrors) ->
+                            createPullRequestAndUpdate packageName elmJson.version foundErrors owner repo model2
+
+                        _ ->
+                            ( model2, Cmd.none )
             in
-            ( model2
-            , Cmd.batch (nextTodo model2 :: sendChange model.clients packageName packageStatus)
+            ( model3
+            , Cmd.batch
+                [ nextTodo model2
+                , cmd
+                , Cmd.batch (sendChange model.clients packageName packageStatus)
+                ]
             )
 
         ClientConnected sessionId clientId ->
@@ -751,7 +766,7 @@ This pull request was made automatically (by @MartinSStewart). You can tell me t
 Have a nice day!"""
 
 
-reportErrors : Github.Owner -> String -> Elm.Project.PackageInfo -> BackendModel -> Task Never ReviewResult
+reportErrors : Github.Owner -> String -> Elm.Project.PackageInfo -> BackendModel -> Task Never ReviewResult_
 reportErrors owner repo elmJson model =
     Github.getRepository { authToken = Env.githubAuth, repo = repo, owner = owner }
         |> Task.andThen
@@ -778,29 +793,16 @@ reportErrors owner repo elmJson model =
                         (\( branchSha, tagSha, bytes ) ->
                             case Zip.fromBytes bytes of
                                 Just zip ->
-                                    let
-                                        result : RunRuleResult
-                                        result =
-                                            checkPackage elmJson model.cachedPackages zip
-                                    in
-                                    if branchSha == tagSha then
-                                        RuleErrors result |> Task.succeed
-                                        --createPullRequest
-                                        --    (List.length errors)
-                                        --    elmJsonText
-                                        --    owner
-                                        --    repo
-                                        --    defaultBranch
-                                        --    |> Task.map (\{ url } -> RuleErrorsAndPullRequest { errors = errors, pullRequestUrl = url })
-
-                                    else
-                                        RuleErrors result |> Task.succeed
+                                    RuleErrors_
+                                        (branchSha == tagSha)
+                                        (checkPackage elmJson model.cachedPackages zip)
+                                        |> Task.succeed
 
                                 Nothing ->
-                                    Task.succeed CouldNotOpenDefaultBranchZip
+                                    Task.succeed CouldNotOpenDefaultBranchZip_
                         )
             )
-        |> Task.onError (HttpError >> Task.succeed)
+        |> Task.onError (HttpError_ >> Task.succeed)
 
 
 project :
@@ -1230,12 +1232,9 @@ updateFromFrontend sessionId clientId msg model =
                                                 (\bytes ->
                                                     case Zip.fromBytes bytes of
                                                         Just zip ->
-                                                            let
-                                                                result : RunRuleResult
-                                                                result =
-                                                                    checkPackage packageData.elmJson model.cachedPackages zip
-                                                            in
-                                                            RuleErrors result |> Task.succeed
+                                                            RuleErrors
+                                                                (checkPackage packageData.elmJson model.cachedPackages zip)
+                                                                |> Task.succeed
 
                                                         Nothing ->
                                                             Task.succeed CouldNotOpenDefaultBranchZip
