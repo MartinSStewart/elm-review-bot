@@ -159,6 +159,7 @@ type FrontendMsg
     | TypedPassword String
     | PressedCreatePullRequest Elm.Package.Name
     | PressedRerunPackage Elm.Package.Name Version
+    | PressedFetchNewPackages
 
 
 type ToBackend
@@ -167,6 +168,7 @@ type ToBackend
     | LoginRequest String
     | PullRequestRequest Elm.Package.Name
     | RerunPackageRequest Elm.Package.Name Version
+    | FetchNewPackagesRequest
 
 
 type BackendMsg

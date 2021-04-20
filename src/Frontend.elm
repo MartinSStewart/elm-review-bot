@@ -110,6 +110,9 @@ update msg model =
         PressedRerunPackage name version ->
             ( model, Lamdera.sendToBackend (RerunPackageRequest name version) )
 
+        PressedFetchNewPackages ->
+            ( model, Lamdera.sendToBackend FetchNewPackagesRequest )
+
 
 updateFromBackend : ToFrontend -> FrontendModel -> ( FrontendModel, Cmd FrontendMsg )
 updateFromBackend msg model =
@@ -192,6 +195,7 @@ view model =
                                         , label = Element.text "Show requested order"
                                         }
                             , Element.text <| "Total packages: " ++ String.fromInt (Dict.size model.state)
+                            , fetchNewPackagesButton
 
                             --, resetBackendButton
                             --, resetRuleButton
@@ -339,6 +343,15 @@ rerunPackageButton packageName version =
         buttonAttributes
         { onPress = PressedRerunPackage packageName version |> Just
         , label = Element.text "Rerun package"
+        }
+
+
+fetchNewPackagesButton : Element FrontendMsg
+fetchNewPackagesButton =
+    Element.Input.button
+        buttonAttributes
+        { onPress = Just PressedFetchNewPackages
+        , label = Element.text "Fetch new packages"
         }
 
 
