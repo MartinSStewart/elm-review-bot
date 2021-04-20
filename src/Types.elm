@@ -12,6 +12,7 @@ import Http
 import Lamdera exposing (ClientId, SessionId)
 import PackageStatus exposing (PackageStatus(..), ReviewResult, ReviewResult_)
 import Set exposing (Set)
+import Time
 import Url exposing (Url)
 
 
@@ -194,6 +195,7 @@ type BackendMsg
         , updateIndex : Int
         }
         ReviewResult
+    | TimeElapsed Time.Posix
 
 
 type ToFrontend

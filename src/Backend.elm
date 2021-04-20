@@ -3,6 +3,7 @@ module Backend exposing (..)
 import AssocList
 import Bytes exposing (Bytes)
 import Dict exposing (Dict)
+import Duration
 import Elm.Constraint
 import Elm.Docs
 import Elm.Module
@@ -27,6 +28,7 @@ import Review.Project.Dependency
 import Review.Rule
 import Set exposing (Set)
 import Task exposing (Task)
+import Time
 import Types exposing (BackendModel, BackendMsg(..), PackageEndpoint, ToBackend(..), ToFrontend(..))
 import Zip exposing (Zip)
 import Zip.Entry
@@ -131,8 +133,15 @@ decodeAllPackages =
         |> Json.Decode.map List.reverse
 
 
-getAllPackages : Int -> Cmd BackendMsg
-getAllPackages cachedCount =
+getAllPackages : BackendModel -> Cmd BackendMsg
+getAllPackages model =
+    let
+        cachedCount =
+            Dict.foldl
+                (\_ versions total -> total + AssocList.size versions)
+                packageCountOffset
+                model.cachedPackages
+    in
     Http.get
         { url = "https://package.elm-lang.org/all-packages/since/" ++ String.fromInt cachedCount
         , expect = Http.expectJson GotNewPackagePreviews decodeAllPackages
@@ -229,13 +238,18 @@ app =
                 Sub.batch
                     [ Lamdera.onConnect ClientConnected
                     , Lamdera.onDisconnect ClientDisconnected
+                    , Time.every (Duration.minutes 30 |> Duration.inMilliseconds) TimeElapsed
                     ]
         }
 
 
 init : ( BackendModel, Cmd BackendMsg )
 init =
-    ( { cachedPackages = Dict.empty, clients = Set.empty, updateIndex = 0 }
+    let
+        model =
+            { cachedPackages = Dict.empty, clients = Set.empty, updateIndex = 0 }
+    in
+    ( model
       --, Task.perform
       --    (\_ ->
       --        [ ( "elm/core", Version.fromString "1.0.1" )
@@ -274,7 +288,7 @@ init =
       --elm/html 1.0.0 <= v < 2.0.0
       --elm/json 1.0.0 <= v < 2.0.0
       --elm/time 1.0.0 <= v < 2.0.0
-    , getAllPackages packageCountOffset
+    , getAllPackages model
     )
 
 
@@ -473,6 +487,9 @@ update msg model =
               }
             , Cmd.batch (sendChange model.clients packageName packageStatus)
             )
+
+        TimeElapsed _ ->
+            ( model, getAllPackages model )
 
 
 sendChange : Set ClientId -> Elm.Package.Name -> PackageStatus -> List (Cmd backendMsg)
@@ -1189,7 +1206,7 @@ updateFromFrontend sessionId clientId msg model =
                             )
                             model.cachedPackages
                   }
-                , getAllPackages packageCountOffset
+                , getAllPackages model
                 )
 
         PullRequestRequest packageName ->
@@ -1261,7 +1278,7 @@ updateFromFrontend sessionId clientId msg model =
                 )
 
         FetchNewPackagesRequest ->
-            ( model, getAllPackages packageCountOffset )
+            ( model, getAllPackages model )
 
 
 createPullRequestAndUpdate :
