@@ -384,8 +384,9 @@ update msg model =
 
                 ( model3, cmd ) =
                     case result of
-                        --RuleErrors_ True (FoundErrors foundErrors) ->
-                        --    createPullRequestAndUpdate packageName elmJson.version foundErrors owner repo model2
+                        RuleErrors_ True (FoundErrors foundErrors) ->
+                            createPullRequestAndUpdate packageName elmJson.version foundErrors owner repo model2
+
                         _ ->
                             ( model2, Cmd.none )
             in
