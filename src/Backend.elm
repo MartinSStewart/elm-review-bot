@@ -514,19 +514,22 @@ sendChange clients packageName packageStatus =
         (Set.toList clients)
 
 
-sendUpdates : ClientId -> BackendModel -> Cmd backendMsg
+sendUpdates : ClientId -> BackendModel -> Cmd BackendMsg
 sendUpdates clientId model =
-    Dict.map
-        (\_ value ->
-            AssocList.toList value
-                |> List.filterMap
-                    (\( key, packageStatus ) ->
-                        Types.statusToStatusFrontend packageStatus |> Maybe.map (Tuple.pair key)
-                    )
-                |> AssocList.fromList
-        )
-        model.cachedPackages
-        |> Updates
+    FirstUpdate
+        { cachedPackages =
+            Dict.map
+                (\_ value ->
+                    AssocList.toList value
+                        |> List.filterMap
+                            (\( key, packageStatus ) ->
+                                Types.statusToStatusFrontend packageStatus |> Maybe.map (Tuple.pair key)
+                            )
+                        |> AssocList.fromList
+                )
+                model.cachedPackages
+        , ignoreList = Env.ignoreList
+        }
         |> Lamdera.sendToFrontend clientId
 
 

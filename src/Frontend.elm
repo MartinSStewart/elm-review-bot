@@ -17,7 +17,17 @@ import List.Extra as List
 import List.Nonempty
 import PackageStatus exposing (ReviewResult(..), RunRuleResult(..))
 import Review.Fix
-import Types exposing (DisplayOrder(..), FrontendModel, FrontendMsg(..), LoginStatus(..), PackageStatusFrontend(..), ToBackend(..), ToFrontend(..))
+import Set
+import Types
+    exposing
+        ( DisplayOrder(..)
+        , FrontendModel
+        , FrontendMsg(..)
+        , LoginStatus(..)
+        , PackageStatusFrontend(..)
+        , ToBackend(..)
+        , ToFrontend(..)
+        )
 import Url
 
 
@@ -39,6 +49,7 @@ init _ key =
       , state = Dict.empty
       , order = RequestOrder
       , loginStatus = NotLoggedIn ""
+      , ignoreList = Set.empty
       }
     , Cmd.none
     )
@@ -132,22 +143,10 @@ updateFromBackend msg model =
             , Cmd.none
             )
 
-
-
---resetBackendButton =
---    Element.Input.button
---        buttonAttributes
---        { onPress = Just PressedResetBackend
---        , label = Element.text "Reset backend"
---        }
---
---
---resetRuleButton =
---    Element.Input.button
---        buttonAttributes
---        { onPress = Just PressedResetRules
---        , label = Element.text "Reset rules"
---        }
+        FirstUpdate { cachedPackages, ignoreList } ->
+            ( { model | state = cachedPackages, ignoreList = ignoreList, loginStatus = LoggedIn }
+            , Cmd.none
+            )
 
 
 buttonAttributes =
@@ -199,6 +198,12 @@ view model =
 
                             --, resetBackendButton
                             --, resetRuleButton
+                            ]
+                        , Element.paragraph []
+                            [ Set.toList model.ignoreList
+                                |> String.join ", "
+                                |> (++) "Ignored: "
+                                |> Element.text
                             ]
                         , packagesView model
                         ]

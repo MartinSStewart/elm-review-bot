@@ -21,6 +21,7 @@ type alias FrontendModel =
     , key : Key
     , order : DisplayOrder
     , loginStatus : LoginStatus
+    , ignoreList : Set String
     }
 
 
@@ -200,6 +201,10 @@ type BackendMsg
 
 type ToFrontend
     = Updates (Dict String (AssocList.Dict Version PackageStatusFrontend))
+    | FirstUpdate
+        { cachedPackages : Dict String (AssocList.Dict Version PackageStatusFrontend)
+        , ignoreList : Set String
+        }
 
 
 type alias PackageEndpoint =
