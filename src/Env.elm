@@ -4,6 +4,7 @@ module Env exposing (..)
 -- See https://dashboard.lamdera.app/docs/environment for more info.
 
 import Github
+import Set exposing (Set)
 
 
 githubAuth_ : String
@@ -18,3 +19,13 @@ githubAuth =
 adminPassword : String
 adminPassword =
     "123"
+
+
+ignoreList_ : String
+ignoreList_ =
+    ""
+
+
+ignoreList : Set String
+ignoreList =
+    ignoreList_ |> String.split "," |> List.map String.trim |> Set.fromList

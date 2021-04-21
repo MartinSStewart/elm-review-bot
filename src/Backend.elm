@@ -397,8 +397,8 @@ update msg model =
                     ownerAndRepo packageName
 
                 ( model3, cmd ) =
-                    case result of
-                        RuleErrors_ True (FoundErrors foundErrors) ->
+                    case ( result, Set.member (Github.ownerToString owner) Env.ignoreList ) of
+                        ( RuleErrors_ True (FoundErrors foundErrors), False ) ->
                             createPullRequestAndUpdate packageName elmJson.version foundErrors owner repo model2
 
                         _ ->
