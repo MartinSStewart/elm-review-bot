@@ -920,7 +920,11 @@ project elmJson srcModules testModules =
             }
 
 
-checkPackage : Elm.Project.PackageInfo -> Dict String (AssocList.Dict Version PackageStatus) -> Zip -> RunRuleResult
+checkPackage :
+    Elm.Project.PackageInfo
+    -> Dict String (AssocList.Dict Version PackageStatus)
+    -> Zip
+    -> RunRuleResult
 checkPackage elmJson cached zip =
     let
         modules : String -> List { path : String, source : String }
