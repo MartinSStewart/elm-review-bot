@@ -6,5 +6,6 @@ Currently the bot only checks if there are unused dependencies but some future c
 - Check that the Elm version range in the elm.json file is valid
 - Check that packages don't depend on packages that no longer exist
 - Check that all the types used by exposed functions are also exposed
+- Detect Debug.* functions (apparently there's some bug that lets you include Debug.log in published packages)
 
 This bot is written 100% written using Elm and is hosted with Lamdera.
