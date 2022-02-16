@@ -780,9 +780,9 @@ npx elm-review --fix # fixes the issue.
 ```
 More information on how to get started in the [`elm-review` documentation](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/), and you can read more about [how dead code removal](https://jfmengels.net/safe-dead-code-removal/) is done using this tool.
 
-This pull request was made automatically (by @MartinSStewart). You can tell me to stop making pull requests like this by writing "please stop".
+This pull request was made automatically (by @MartinSStewart). You can tell me to stop making pull requests like this by writing "please stop". You can report bugs in the [elm-review-bot repo](https://github.com/MartinSStewart/elm-review-bot).
 
-Have a nice day!"""
+Have a nice day! 🤖"""
 
 
 reportErrors : Github.Owner -> String -> Elm.Project.PackageInfo -> BackendModel -> Task Never ReviewResult_
